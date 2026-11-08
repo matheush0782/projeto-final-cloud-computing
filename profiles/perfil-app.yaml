@@ -1,0 +1,16 @@
+description: Papel aplicacao WordPress
+config:
+  cloud-init.user-data: |
+    #cloud-config
+    package_update: true
+    packages:
+      - apache2
+      - libapache2-mod-php
+      - php
+      - php-mysql
+      - php-xml
+      - php-curl
+      - php-gd
+      - php-mbstring
+      - php-zip
+      - curl

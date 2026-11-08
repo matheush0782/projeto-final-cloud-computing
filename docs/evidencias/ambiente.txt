@@ -1,0 +1,17 @@
+Projeto: Cloud Computing - Projeto Final
+Trilha: A - WordPress
+Sistema operacional: Ubuntu 24.04
+LXD: 5.21.7 LTS
+Kernel: 6.8.0-139-generic
+
+Diagnóstico:
+- LXD instalado e funcionando.
+- Container meu-container em execução.
+- Storage pool default (ZFS).
+- Rede lxdbr0 disponível.
+- Dispositivo /dev/kvm não encontrado.
+- QEMU não instalado.
+
+Observação:
+O teste de virtualização KVM está pendente devido à ausência
+do dispositivo /dev/kvm e do QEMU.

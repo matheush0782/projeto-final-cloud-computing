@@ -1,0 +1,6 @@
+*.key
+*.env
+*.tar.gz
+
+# Backups locais privados (não versionar)
+backup/
