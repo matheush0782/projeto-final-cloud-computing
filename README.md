@@ -4,7 +4,9 @@
 
 Implementar uma infraestrutura de hospedagem de um site WordPress utilizando Ubuntu 24.04, LXD, containers Linux, Nginx, Apache, PHP e MariaDB.
 
-Este documento registra o estado atual da implementação e as atividades realizadas até a entrega parcial.
+Este documento mantém o histórico da entrega parcial e acrescenta a integração das fases 7 e 8. As evidências antigas não comprovam a execução dos novos scripts na VM.
+
+Para preparar uma VM nova, atualizar pelo GitHub, implantar e recriar com segurança, consulte [o guia de integração e automação](docs/automacao.md). A interpretação de CPU/memória e os testes de limites estão em [monitoramento](docs/monitoramento.md).
 
 ## 2. Ambiente utilizado
 
@@ -91,6 +93,8 @@ A configuração está armazenada em:
 
 conf/nginx-servico.conf
 
+Na automação, esse arquivo é um template com `__APP_IP__`, preenchido pelo `deploy.sh`. Inclui também HTTPS com certificado autoassinado gerado dentro do proxy. Não copie o template sem renderização para um Nginx ativo.
+
 ## 9. Backups
 
 Foram gerados backups locais:
@@ -126,3 +130,34 @@ Entre os registros estão:
 ## 12. Observação
 
 Este README representa o estado parcial da implementação. Ele não indica que todas as etapas do projeto final foram concluídas.
+
+## 13. Automação de PROD e DEV
+
+A branch Git `dev` armazena o código da equipe; `ENV=dev` seleciona o ambiente de execução. Os mesmos scripts criam PROD (`proxy/app/db`, HTTP 8081, HTTPS 8444) e DEV (`dev-proxy/dev-app/dev-db`, HTTP 8082, HTTPS 8445). DEV usa a rede 10.10.20.0/24 e os volumes separados `dev-vol-db` e `dev-vol-uploads`.
+
+Depois que a equipe adicionar os arquivos no GitHub, atualize o clone na VM:
+
+```bash
+git status
+git switch dev
+git pull --ff-only origin dev
+chmod +x scripts/*.sh conf/*.sh
+ENV=dev ./scripts/deploy.sh --dry-run
+```
+
+O `git pull` não executa scripts. O deploy real exige Bash, LXD local, Python/PyYAML e uma senha informada por `DB_PASS` ou `DB_PASS_PROD`/`DB_PASS_DEV`. O endereço usado no navegador é configurado com `VM_HOST` (padrão 127.0.0.1). Siga os comandos completos do [guia de automação](docs/automacao.md).
+
+`deploy.sh` não exclui instâncias existentes sem `--recreate` e confirmação. `destroy.sh` preserva banco/uploads por padrão; `--volumes` apaga os dois volumes do ambiente e seus dados. Discos raiz e snapshots das instâncias são perdidos mesmo sem `--volumes`, portanto temas/plugins personalizados precisam de backup. Não use `destroy.sh --volumes` no CloudPress atual sem backup verificado.
+
+## 14. Monitoramento e evidências pendentes
+
+```bash
+./scripts/monitor.sh --all
+ENV=dev ./scripts/monitor.sh --once
+ENV=prod ./scripts/test-limits.sh
+ENV=dev ./scripts/test-limits.sh --load
+```
+
+O teste de carga é opcional, limitado a 20 segundos dentro de `dev-app`. A coluna de CPU mostra segundos acumulados, não percentual. Os profiles atuais limitam CPU/memória, mas não configuram quota de disco.
+
+Os testes em `tests/` validam fluxos com LXC simulado e PHP/cópia com arquivos temporários; não acessam a VM da equipe. Ainda é necessário coletar as evidências reais da reconstrução, PROD/DEV, HTTPS, persistência, painel e limites em `docs/evidencias/`. Não envie senhas, chaves TLS ou backups ao GitHub.
