@@ -4,7 +4,9 @@
 
 Implementar uma infraestrutura de hospedagem de um site WordPress utilizando Ubuntu 24.04, LXD, containers Linux, Nginx, Apache, PHP e MariaDB.
 
-Este documento registra o estado atual da implementação e as atividades realizadas até a entrega parcial.
+Este documento preserva o histórico da entrega parcial e registra a integração dos scripts do Samuel com a Fase 5 já presente na `dev`. As saídas antigas não comprovam execução dos scripts novos.
+
+Consulte [automação integrada](docs/automacao.md), [testes reais na VM](docs/testes-na-vm.md) e [monitoramento](docs/monitoramento.md) antes de implantar ou recriar recursos.
 
 ## 2. Ambiente utilizado
 
@@ -126,3 +128,37 @@ Entre os registros estão:
 ## 12. Observação
 
 Este README representa o estado parcial da implementação. Ele não indica que todas as etapas do projeto final foram concluídas.
+
+## 13. Integração do Samuel com a Fase 5
+
+A revisão parte da `dev` no commit `8145908`, após a incorporação da Fase 5 pela PR #3. A automação da PR #1 foi reaproveitada sem `.DS_Store` e sem excluir as evidências anteriores. Os arquivos de acesso/TLS da equipe foram preservados.
+
+O deploy não gera mais um certificado de serviço autoassinado separado. Ele usa a CA própria e `scripts/fase5-tls.sh` como estratégia única de TLS, com os caminhos `/etc/nginx/ssl/servico.crt` e `/etc/nginx/ssl/servico.key`. Os materiais em `conf/tls/prod/` e `conf/tls/dev/` são locais, privados e ignorados pelo Git.
+
+`fase5-tls.sh` atualiza as URLs WordPress com PHP, ativa a configuração Nginx e verifica/atualiza `porta-https` sem duplicá-lo. Na recriação, reaplica os certificados da CA existente. O deploy exige `IP_VM` real e `IP_SITE` válido para esse fluxo; `--http-only` é a alternativa explícita para manter apenas HTTP enquanto a equipe valida TLS.
+
+## 14. Portas e remoção segura
+
+PROD: HTTP **8081**, HTTPS do WordPress **8444**. DEV: HTTP **8082**, HTTPS do WordPress **8445**. A porta **8443** pertence exclusivamente à API/UI do LXD, não é evidência de HTTPS WordPress. Depois da ativação TLS, HTTP redireciona para a porta HTTPS do ambiente.
+
+`destroy.sh` e `deploy.sh --recreate` removem containers, discos raiz e snapshots das instâncias, mantendo banco/uploads em volumes personalizados por padrão. Temas/plugins personalizados no root precisam de backup. `destroy.sh --volumes` também apaga os volumes e seus dados, exigindo uma confirmação adicional: `--yes` sozinho não autoriza essa exclusão.
+
+```bash
+ENV=dev bash scripts/deploy.sh --dry-run
+ENV=dev bash scripts/destroy.sh --volumes --dry-run
+```
+
+Esses planos não consultam nem alteram o LXD. Não execute a exclusão de volumes de PROD sem backup verificado e acordo da equipe.
+
+## 15. Validação e evidências pendentes
+
+```bash
+ENV=dev bash scripts/monitor.sh --once
+ENV=dev bash scripts/test-limits.sh
+ENV=dev bash scripts/test-limits.sh --load
+ENV=dev IP_SITE=127.0.0.1 bash scripts/registrar-evidencias.sh
+```
+
+A carga é opcional, limitada a 20 segundos dentro de `dev-app`. O coletor só lê informações e registra resultados; não executa deploy, destroy ou carga. Não substitui logs da reconstrução, o teste de persistência e prints do navegador.
+
+Testes locais em `tests/` verificam código com LXC/curl simulados e fixtures PHP/OpenSSL; não equivalem a testes na VM. A validação real de PROD/DEV, HTTPS com CA confiável, reconstrução, limites e monitoramento ainda precisa ser realizada e registrada pela equipe. Não publique chaves privadas, senhas, tokens ou backups nas evidências.
