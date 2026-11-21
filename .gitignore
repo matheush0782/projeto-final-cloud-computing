@@ -4,3 +4,8 @@
 
 # Backups locais privados (não versionar)
 backup/
+
+# Certificados e arquivos locais da Fase 5
+/conf/tls/
+*.p12
+*.pfx
