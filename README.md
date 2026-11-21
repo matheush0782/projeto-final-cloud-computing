@@ -162,3 +162,13 @@ ENV=dev IP_SITE=127.0.0.1 bash scripts/registrar-evidencias.sh
 A carga é opcional, limitada a 20 segundos dentro de `dev-app`. O coletor só lê informações e registra resultados; não executa deploy, destroy ou carga. Não substitui logs da reconstrução, o teste de persistência e prints do navegador.
 
 Testes locais em `tests/` verificam código com LXC/curl simulados e fixtures PHP/OpenSSL; não equivalem a testes na VM. A validação real de PROD/DEV, HTTPS com CA confiável, reconstrução, limites e monitoramento ainda precisa ser realizada e registrada pela equipe. Não publique chaves privadas, senhas, tokens ou backups nas evidências.
+
+## 16. Correção de segurança da PR #4
+
+O instalador configura `wp-config.php` como **`root:www-data`, modo `0640`**: Apache/PHP lê pelo grupo, sem escrita direta no arquivo. A Fase 5 preserva essas permissões ao alterar URLs. Isso não impede substituição via diretório pai, que continua com o comportamento de propriedade existente.
+
+O deploy agora transmite a senha por stdin não interativo para MariaDB, WordPress e a checagem PHP, sem colocá-la em argv. Os dois instaladores exigem `--password-stdin`; atualize os três scripts juntos. Senhas lidas com `read -rsp` continuam compatíveis com `DB_PASS` e com os fallbacks PROD/DEV. A limpeza de temporários e os limites desta proteção estão em [automação](docs/automacao.md).
+
+Fazer `git pull` não corrige automaticamente o arquivo de uma instalação existente. Use o procedimento de proprietário/modo da documentação, após backup e confirmação do destino, sem apagar/recriar containers apenas para isso.
+
+A suíte local passou com **45 testes Python, sem falhas, erros ou skips**, além de Bash/PHP/ShellCheck e do teste local da Fase 5. As permissões foram verificadas em arquivos temporários reais; LXD/curl continuam simulados. Veja [validação local](docs/validacao-local.md). Os testes na VM/navegador permanecem pendentes.

@@ -1,6 +1,31 @@
 # Validação local da revisão do Samuel
 
-Revisão realizada em **21/11/2026**, partindo da `dev` no commit `8145908f50e5dc1d33b69899820d31b06f129e98`. A base remota foi reconfirmada antes do empacotamento. Nenhum commit, push, merge ou comando destrutivo real foi executado nesta tarefa.
+## Correção de segurança da PR #4 — resultado atual
+
+Em **21/11/2026**, a correção incremental foi preparada sobre o head publicado da PR #4: `1135bfa1eb9f9c5c09b1dff3309456363f2c8f22`, branch `ajustes-samuel-fases-7-8`. A PR estava aberta, com destino `dev`. Nenhum commit, push, merge, deploy ou destroy real foi executado nesta revisão.
+
+Após corrigir proprietário/permissões e o transporte da senha, foram revisados os contratos `common.sh`/deploy/Fase 5 e ampliados os testes, preservando os anteriores. O teste de permissões executa o bloco real do instalador em um docroot temporário, em vez de apenas reproduzir comandos de chown inventados no teste. Os testes de transporte verificam também formato/quantidade de argumentos, a opção não interativa e ausência de valores redigidos que poderiam esconder uma regressão.
+
+O comando final `bash tests/run_local.sh` terminou com **código 0**:
+
+```text
+Ran 45 tests in 215.571s
+
+OK
+Validações locais concluídas. Testes reais no LXD/navegador continuam pendentes.
+```
+
+Resultado: **45 testes aprovados; 0 falhas, 0 erros e 0 skips**. Também passaram sintaxe Bash, lint PHP, ShellCheck dos scripts de automação/instaladores e `tests/test_fase5_local.sh`. A nova suíte `tests/test_seguranca.py` tem 11 métodos de teste, além dos casos parametrizados internos, e foi executada isoladamente antes da suíte completa. Uma execução em andamento foi interrompida para reforçar a vinculação do teste ao instalador; o resultado acima é da reexecução completa final.
+
+Os novos testes verificam: senha por stdin nos três destinos em PROD/DEV; precedência de `DB_PASS` e dos fallbacks por ambiente; ausência da senha em argv, logs e ambiente dos subprocessos LXC; recusa de entrada vazia, multilinear, CR e argumentos legados; xtrace sem senha; interrupção do deploy na falha do WordPress; limpeza de temporários em falha e TERM tratável; arquivo real com uid 0, grupo www-data e modo 0640; leitura e recusa de escrita direta por www-data; e manutenção de proprietário/grupo/modo após o atualizador PHP real da Fase 5, incluindo idempotência.
+
+As operações de proprietário/grupo foram realizadas com `sudo -n` **somente em fixtures temporárias do sandbox**. Isso não equivale a verificar o arquivo da VM. Os comandos LXD/curl permanecem simulados; o mock guarda somente comprimento/hash e indicadores de presença de credenciais, nunca a senha recebida. PHP e OpenSSL são reais. Não houve inicialização de daemon LXD, MariaDB ou Apache real.
+
+Permanecem pendentes: deploy real PROD/DEV, HTTPS 8444/8445 e navegador/CA/SAN, persistência após recriação, limites CPU/memória, monitoramento, coletor e permissões do arquivo realmente instalado na VM. A propriedade do diretório pai continua com o comportamento existente: a correção de `0640` impede escrita direta, não garante proteção contra remoção/substituição pelo servidor. Administradores ainda conseguem ler memória/ambiente e arquivos privados; não há promessa de sigilo contra root.
+
+## Histórico da validação inicial
+
+A revisão inicial foi realizada em **21/11/2026**, partindo da `dev` no commit `8145908f50e5dc1d33b69899820d31b06f129e98`. A base remota foi reconfirmada antes daquele empacotamento. Nenhum commit, push, merge ou comando destrutivo real foi executado naquela tarefa. Os resultados abaixo pertencem à validação inicial, anterior à correção de segurança.
 
 ## Resultado da execução
 

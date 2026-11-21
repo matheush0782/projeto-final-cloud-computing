@@ -69,7 +69,43 @@ ENV=dev bash scripts/fase5-tls.sh
 
 Não execute o deploy novamente por cima de instâncias existentes para somente atualizar TLS. Reexecute `fase5-tls.sh`, que já é idempotente, com os mesmos endereços. Materiais TLS incompletos, expirados ou com SAN incompatível exigem revisão; não apague a CA às cegas.
 
-As senhas aceitam letras, números e `_ @ % + = . : , -` e não ficam embutidas no código. `DB_PASS` tem prioridade sobre `DB_PASS_PROD/DEV`; remova-a do ambiente se quiser credenciais distintas. Os valores passam como argumentos aos scripts do guest, portanto usuários administrativos da VM podem vê-los nos processos. Não use `bash -x` com credenciais.
+As senhas aceitam letras, números e `_ @ % + = . : , -` e não ficam embutidas no código. `DB_PASS` tem prioridade sobre `DB_PASS_PROD/DEV`; remova-a do ambiente se quiser credenciais distintas. Leia a senha com `read -rsp`, como no exemplo, para não digitar seu valor literal no histórico do terminal. Remova as variáveis do seu terminal após o uso.
+
+## Senha por stdin e proteção do wp-config.php
+
+Na correção de segurança da PR #4, o deploy retira `DB_PASS`, `DB_PASS_PROD` e `DB_PASS_DEV` do ambiente dos comandos filhos depois de selecionar a senha. MariaDB, instalador WordPress e checagem de conexão PHP recebem o valor por pipe em **stdin**, com `lxc exec --mode=non-interactive`; a senha não aparece nos argumentos desses processos. Não use `--disable-stdin`, pois impediria o recebimento. [2]
+
+Os três arquivos `scripts/deploy.sh`, `conf/config-mariadb.sh` e `conf/instala-wp.sh` precisam ser atualizados juntos. As interfaces internas agora são:
+
+```text
+config-mariadb.sh --password-stdin APP_IP BASE USUARIO
+instala-wp.sh --password-stdin DB_HOST URL [DB_NAME=wordpress] [DB_USER=wpuser]
+```
+
+Esses scripts são executados como root dentro dos containers pelo deploy, não diretamente no host da VM. Recebem somente uma linha de senha no stdin; aceitam EOF após a linha, mas rejeitam entrada vazia, linhas extras ou CR. A chamada antiga com senha em argumento foi deliberadamente desativada e retorna instrução de uso sem reproduzir seus argumentos.
+
+Não há arquivo de senha nomeado no transporte do host para os containers. O instalador ainda precisa gerar um `wp-config.php` temporário com credenciais: ele fica no diretório criado por `mktemp`, com `umask 077`, e é removido pelo `trap EXIT`, inclusive em falhas. INT/TERM tratáveis levam à saída e à limpeza; SIGKILL, queda de energia ou falha de disco não permitem garantir execução de traps. O gerador PHP recebe a senha por ambiente controlado dentro do container, não por argv. Isso não impede que root inspecione memória, ambiente ou o próprio arquivo final.
+
+Os scripts de credenciais desativam xtrace/verbose antes de ler a senha, e erros do SQL que contém credenciais são suprimidos para não revelar a consulta em logs. Mesmo assim, não grave a digitação de credenciais nem use rastreamento externo: revise os registros antes de publicar e não exponha variáveis do terminal, `wp-config.php` ou configurações privadas.
+
+O arquivo final `/var/www/html/wp-config.php` recebe **`root:www-data` e modo `0640`**. Apache/PHP consegue lê-lo pelo grupo, mas `www-data` não tem permissão de escrita direta. A normalização dos demais arquivos exclui o wp-config para não torná-lo temporariamente `0644`. O atualizador PHP da Fase 5 preserva proprietário, grupo e modo quando altera as URLs.
+
+Essa mudança protege a escrita direta no arquivo, não é um isolamento completo do WordPress: o diretório do site continua pertencendo a `www-data`, mantendo o comportamento existente. Um processo com escrita no diretório pai ainda pode tentar remover/substituir o arquivo; proteção contra isso exigiria uma política adicional para diretórios/atualizações, fora desta correção. Não declare que o site ficou imutável.
+
+Copiar os scripts para o GitHub ou fazer `git pull` não muda as permissões de um WordPress já instalado. Para corrigir o arquivo existente sem recriar containers, faça backup, confirme ambiente/projeto e combine a intervenção. Exemplo para **DEV**; em PROD, selecione `APP=app` somente após conferir que é o destino desejado:
+
+```bash
+APP=dev-app
+lxc --project="$PROJETO" exec "$APP" -- test -f /var/www/html/wp-config.php
+lxc --project="$PROJETO" exec "$APP" -- stat -c '%U:%G %a %n' /var/www/html/wp-config.php
+lxc --project="$PROJETO" exec "$APP" -- chown root:www-data /var/www/html/wp-config.php
+lxc --project="$PROJETO" exec "$APP" -- chmod 0640 /var/www/html/wp-config.php
+lxc --project="$PROJETO" exec "$APP" -- stat -c '%U:%G %a %n' /var/www/html/wp-config.php
+lxc --project="$PROJETO" exec "$APP" -- runuser -u www-data -- test -r /var/www/html/wp-config.php
+lxc --project="$PROJETO" exec "$APP" -- runuser -u www-data -- test ! -w /var/www/html/wp-config.php
+```
+
+Os dois últimos comandos devem terminar com código 0. Confira também o site no navegador; não imprima o conteúdo do wp-config para provar leitura. O procedimento não altera banco, URLs ou volumes e não exige `destroy.sh`/`--recreate`.
 
 ## Remoção: o que se perde
 
@@ -149,3 +185,4 @@ O comando verifica sintaxe Bash/PHP, ShellCheck, o teste PHP existente da Fase 5
 ## Referências
 
 [1]: https://canonical.com/lxd/docs/v5.21/howto/storage_volumes/ "LXD 5.21 — Ciclo de vida e administração de volumes"
+[2]: https://canonical.com/lxd/docs/v5.21/reference/manpages/lxc/exec/ "LXD 5.21 — lxc exec e entrada padrão não interativa"

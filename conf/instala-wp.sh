@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
+# Não permita que bash -x revele a senha ou a configuração gerada.
+set +x
+set +v
 set -Eeuo pipefail
 umask 077
 
 uso() {
-    printf 'Uso: %s DB_HOST DB_PASS URL [DB_NAME=wordpress] [DB_USER=wpuser]\n' "$0" >&2
+    printf 'Uso: %s --password-stdin DB_HOST URL [DB_NAME=wordpress] [DB_USER=wpuser] (senha de uma linha no stdin)\n' "$0" >&2
     exit 2
 }
 
@@ -65,15 +68,25 @@ validar_url() {
 
 (( $# >= 3 && $# <= 5 )) || uso
 [[ $EUID -eq 0 ]] || erro 'este script precisa ser executado como root'
+[[ $1 == --password-stdin ]] || uso
+shift
 
 DB_HOST=$1
-DB_PASS=$2
-URL=$3
-DB_NAME=${4:-wordpress}
-DB_USER=${5:-wpuser}
+URL=$2
+DB_NAME=${3:-wordpress}
+DB_USER=${4:-wpuser}
 
 [[ $DB_HOST =~ ^[A-Za-z0-9][A-Za-z0-9._:-]*$ ]] || \
     erro 'DB_HOST contém caracteres não permitidos'
+# Não aceite senha em argv nem exporte credenciais herdadas aos comandos filhos.
+[[ ! -t 0 ]] || erro 'transmita a senha por stdin não interativo'
+unset DB_PASS DB_PASS_PROD DB_PASS_DEV
+DB_PASS=
+IFS= read -r DB_PASS || [[ -n $DB_PASS ]] || erro 'stdin não forneceu uma senha'
+EXTRA=
+if IFS= read -r EXTRA || [[ -n $EXTRA ]]; then
+    erro 'stdin deve conter somente uma linha de senha'
+fi
 [[ -n $DB_PASS && $DB_PASS != *$'\n'* && $DB_PASS != *$'\r'* ]] || \
     erro 'DB_PASS deve ser não vazia e não conter quebras de linha'
 validar_identificador "$DB_NAME" || erro 'DB_NAME deve ser um identificador válido'
@@ -97,6 +110,8 @@ limpar() {
     rm -rf -- "$TEMP_DIR"
 }
 trap limpar EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 mkdir -p "$DOCROOT"
 
@@ -273,6 +288,7 @@ foreach (['AUTH_KEY', 'SECURE_AUTH_KEY', 'LOGGED_IN_KEY', 'NONCE_KEY',
 
 echo $conteudo;
 PHP
+unset DB_PASS EXTRA
 
 install -m 0640 "$CONFIG_NOVO" "$CONFIG_DESTINO"
 
@@ -280,8 +296,10 @@ install -m 0640 "$CONFIG_NOVO" "$CONFIG_DESTINO"
 # o Apache possa gravar nele; nenhum arquivo é apagado ou substituído aqui.
 install -d -o www-data -g www-data -m 0755 "$UPLOADS_DIR"
 chown -R www-data:www-data "$DOCROOT"
+# PHP/Apache lê pelo grupo, mas não pode escrever diretamente no wp-config.
+chown root:www-data "$CONFIG_DESTINO"
 find "$DOCROOT" -type d -exec chmod 0755 {} +
-find "$DOCROOT" -type f -exec chmod 0644 {} +
+find "$DOCROOT" -type f ! -path "$CONFIG_DESTINO" -exec chmod 0644 {} +
 chmod 0640 "$CONFIG_DESTINO"
 chmod 0755 "$UPLOADS_DIR"
 

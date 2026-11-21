@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC1091,SC2153
+# Desative rastreamento antes de selecionar ou transmitir qualquer credencial.
+set +x
+set +v
 set -euo pipefail
 # shellcheck source=scripts/common.sh
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 ajuda() {
   cat <<'TXT'
-Uso: ENV=prod DB_PASS='...' ./scripts/deploy.sh [--dry-run] [--recreate] [--yes]
-     ENV=dev  DB_PASS='...' ./scripts/deploy.sh [--http-only]
+Uso: ENV=prod ./scripts/deploy.sh [--dry-run] [--recreate] [--yes]
+     ENV=dev  ./scripts/deploy.sh [--http-only]
 Opções: --env prod|dev; --recreate remove SOMENTE as três instâncias antes de criar;
         --yes dispensa a confirmação de --recreate; --dry-run só descreve o plano;
         --http-only não executa a Fase 5, não cria certificado nem publica HTTPS.
@@ -18,6 +21,9 @@ Com TLS, informe IP_VM com o IPv4 real da VM. IP_SITE usa VM_HOST por padrão e
 precisa ser IPv4. A CA e servico.* são gerados/reutilizados somente por fase5-tls.sh.
 A instalação começa em HTTP; ao final da Fase 5, HTTPS vira o acesso canônico.
 Volumes são sempre preservados. Faça backup antes de recriar o ambiente existente.
+Leia a senha com read -rsp e exporte DB_PASS_PROD/DB_PASS_DEV antes do deploy.
+Os scripts internos e a checagem PHP recebem a senha por stdin não interativo,
+sem incluí-la em argv e sem criar um arquivo de senha nomeado no host.
 TXT
 }
 
@@ -140,12 +146,14 @@ if "$DRY_RUN"; then
 fi
 
 if [[ "$ENV" == prod ]]; then
-  DB_PASS="${DB_PASS:-${DB_PASS_PROD:-}}"
+  SENHA_BANCO="${DB_PASS:-${DB_PASS_PROD:-}}"
 else
-  DB_PASS="${DB_PASS:-${DB_PASS_DEV:-}}"
+  SENHA_BANCO="${DB_PASS:-${DB_PASS_DEV:-}}"
 fi
-[[ -n "$DB_PASS" ]] || falhar 'Informe DB_PASS ou DB_PASS_PROD/DB_PASS_DEV. Não há senha padrão no código.'
-[[ "$DB_PASS" =~ ^[a-zA-Z0-9_@%+=.:,-]+$ ]] || falhar 'Senha: use apenas letras, números e _ @ % + = . : , - (compatibilidade com a configuração SQL).'
+declare +x SENHA_BANCO
+unset DB_PASS DB_PASS_PROD DB_PASS_DEV
+[[ -n "$SENHA_BANCO" ]] || falhar 'Informe DB_PASS ou DB_PASS_PROD/DB_PASS_DEV. Não há senha padrão no código.'
+[[ "$SENHA_BANCO" =~ ^[a-zA-Z0-9_@%+=.:,-]+$ ]] || falhar 'Senha: use apenas letras, números e _ @ % + = . : , - (compatibilidade com a configuração SQL).'
 
 exigir_comandos lxc python3 timeout
 python3 -c 'import yaml' || falhar 'Instale python3-yaml (sudo apt install python3-yaml).'
@@ -282,12 +290,12 @@ criar_instancia db 12
 lx config device add "${PREFIXO}db" dados disk pool="$POOL" source="${PREFIXO}vol-db" path=/var/lib/mysql
 iniciar db
 lx file push "$RAIZ/conf/config-mariadb.sh" "${PREFIXO}db/root/config-mariadb.sh"
-lx exec "${PREFIXO}db" -- bash /root/config-mariadb.sh "$SUBNET.11" "$DB_NAME" "$DB_USER" "$DB_PASS"
+printf '%s\n' "$SENHA_BANCO" | lx exec "${PREFIXO}db" --mode=non-interactive -- bash /root/config-mariadb.sh --password-stdin "$SUBNET.11" "$DB_NAME" "$DB_USER"
 criar_instancia app 11
 lx config device add "${PREFIXO}app" uploads disk pool="$POOL" source="${PREFIXO}vol-uploads" path=/var/www/html/wp-content/uploads
 iniciar app
 lx file push "$RAIZ/conf/instala-wp.sh" "${PREFIXO}app/root/instala-wp.sh"
-lx exec "${PREFIXO}app" -- bash /root/instala-wp.sh "$SUBNET.12" "$DB_PASS" "$URL" "$DB_NAME" "$DB_USER"
+printf '%s\n' "$SENHA_BANCO" | lx exec "${PREFIXO}app" --mode=non-interactive -- bash /root/instala-wp.sh --password-stdin "$SUBNET.12" "$URL" "$DB_NAME" "$DB_USER"
 criar_instancia proxy 10
 iniciar proxy
 python3 - "$RAIZ/conf/nginx-servico.conf" "$TMP/nginx-servico.conf" "$SUBNET.11" <<'PY'
@@ -306,9 +314,10 @@ lx config device add "${PREFIXO}proxy" porta-http proxy listen="tcp:0.0.0.0:$POR
 lx exec "${PREFIXO}db" -- systemctl is-active --quiet mariadb
 lx exec "${PREFIXO}app" -- systemctl is-active --quiet apache2
 lx exec "${PREFIXO}proxy" -- systemctl is-active --quiet nginx
-# Checa também acesso ao banco com as credenciais da aplicação, sem imprimir a senha.
+# Checa acesso ao banco: a senha também chega ao PHP por stdin, nunca por env/argv.
 # shellcheck disable=SC2016
-lx exec "${PREFIXO}app" -- env DB_HOST="$SUBNET.12" DB_USER="$DB_USER" DB_PASS="$DB_PASS" DB_NAME="$DB_NAME" php -r '$db=new mysqli(getenv("DB_HOST"),getenv("DB_USER"),getenv("DB_PASS"),getenv("DB_NAME")); if ($db->connect_errno) { exit(1); }' >/dev/null
+printf '%s\n' "$SENHA_BANCO" | lx exec "${PREFIXO}app" --mode=non-interactive -- php -r '$senha=rtrim(stream_get_contents(STDIN), "\r\n"); mysqli_report(MYSQLI_REPORT_OFF); $db=@new mysqli($argv[1],$argv[2],$senha,$argv[3]); if ($db->connect_errno) { exit(1); }' "$SUBNET.12" "$DB_USER" "$DB_NAME" >/dev/null 2>&1
+unset SENHA_BANCO
 lx exec "${PREFIXO}app" -- curl --fail --silent --show-error -o /dev/null http://127.0.0.1/
 
 if "$TLS_ATIVO"; then

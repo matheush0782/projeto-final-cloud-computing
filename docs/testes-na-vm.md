@@ -50,6 +50,7 @@ export DB_PASS_DEV
 ```
 
 A senha deve usar letras, números e `_ @ % + = . : , -`. Não cole a senha no GitHub ou no campo de descrição de um commit. Para logs de terminal, informe-a **antes** de iniciar a gravação, sem `bash -x`.
+O deploy corrigido transmite a senha aos dois instaladores e à checagem PHP por stdin não interativo, não por argumentos. Atualize os três scripts juntos. Não execute cópias antigas de `/root/config-mariadb.sh` ou `/root/instala-wp.sh` com senha em argv; o próximo deploy envia as versões novas do repositório. Administradores ainda podem inspecionar memória/ambiente e arquivos privados; não apresente essa mudança como sigilo contra root.
 
 No VirtualBox NAT, confira as regras TCP do Windows para a VM: `8081→8081`, `8444→8444`, `8082→8082`, `8445→8445`. A regra `8443→8443`, se já usada para o LXD, é separada e não deve ser substituída. Se usa outro modo de rede, valide o caminho correspondente e firewall.
 
@@ -93,6 +94,16 @@ curl --fail --head --cacert conf/tls/dev/ca.crt https://127.0.0.1:8445/
 ```
 
 O dispositivo `porta-https` deve aparecer uma única vez, o SAN deve cobrir o endereço utilizado, e curl deve validar a CA **sem `-k`**. Um redirecionamento para o assistente WordPress em banco novo não significa que o conteúdo do site já foi criado.
+
+Confira também as permissões **depois** da atualização de URLs pela Fase 5:
+
+```bash
+lxc --project="$PROJETO" exec dev-app -- stat -c '%U:%G %a %n' /var/www/html/wp-config.php
+lxc --project="$PROJETO" exec dev-app -- runuser -u www-data -- test -r /var/www/html/wp-config.php
+lxc --project="$PROJETO" exec dev-app -- runuser -u www-data -- test ! -w /var/www/html/wp-config.php
+```
+
+Esperado: `root:www-data 640` e código 0 nos dois testes. Eles comprovam acesso de leitura e ausência de escrita direta; não imprima o conteúdo do arquivo, que contém senha. O diretório pai continua gravável pelo servidor, portanto isto não comprova proteção contra remoção/substituição do arquivo. Para uma instalação anterior, o procedimento de correção sem recriar recursos está em `docs/automacao.md`.
 
 Para o navegador no Windows, transfira **somente** `conf/tls/dev/ca.crt`. Antes de confiar na CA, confira sua procedência e compare o fingerprint SHA-256 com o informado pela equipe:
 

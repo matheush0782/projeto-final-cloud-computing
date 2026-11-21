@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """LXC falso usado exclusivamente pelos testes; nunca opera infraestrutura real."""
 import json
+import hashlib
 import os
 import re
+import signal
 import sys
 from pathlib import Path
 
@@ -17,6 +19,16 @@ state.setdefault("profiles", {})
 state.setdefault("networks", {})
 state.setdefault("pools", {})
 state.setdefault("volumes", {})
+state.setdefault("secret_inputs", [])
+
+SECRET_ENV_NAMES = (
+    "DB_PASS",
+    "DB_PASS_PROD",
+    "DB_PASS_DEV",
+    "SENHA_BANCO",
+    "WP_DB_PASS",
+    "MYSQL_PWD",
+)
 
 raw_args = sys.argv[1:]
 project = "default"
@@ -28,7 +40,49 @@ for arg in raw_args:
         args.append(arg)
 
 a = args
-state["log"].append({"project": project, "args": a})
+
+
+def env_credentials_presence():
+    """Return only names and booleans; never copy an environment value."""
+    return {name: name in os.environ for name in SECRET_ENV_NAMES}
+
+
+def redact_sensitive_arg_values(items):
+    """Avoid retaining values paired with conventional secret flags in logs."""
+    redacted = []
+    redact_next = False
+    for item in items:
+        if redact_next:
+            redacted.append("<redacted>")
+            redact_next = False
+            continue
+        redacted.append(item)
+        if item in {"--password", "--password-file", "--secret", "--db-pass"}:
+            redact_next = True
+    if "--" in redacted:
+        separator = redacted.index("--")
+        command = redacted[separator + 1 :]
+        expected_lengths = {
+            ("bash", "/root/config-mariadb.sh"): 6,
+            ("bash", "/root/instala-wp.sh"): 7,
+        }
+        expected = expected_lengths.get(tuple(command[:2]))
+        if expected is not None:
+            if len(command) >= 3 and command[2] != "--password-stdin":
+                redacted[separator + 3] = "<redacted>"
+            elif len(command) > expected:
+                for index in range(separator + 1 + expected, len(redacted)):
+                    redacted[index] = "<redacted>"
+    return redacted
+
+
+state["log"].append(
+    {
+        "project": project,
+        "args": redact_sensitive_arg_values(a),
+        "env_credentials": env_credentials_presence(),
+    }
+)
 
 
 def save() -> None:
@@ -53,6 +107,34 @@ def parse_options(items):
             key, value = item.split("=", 1)
             options[key] = value
     return options
+
+
+def secret_command_kind(command):
+    if command[:2] == ["bash", "/root/config-mariadb.sh"]:
+        return "mariadb"
+    if command[:2] == ["bash", "/root/instala-wp.sh"]:
+        return "wordpress"
+    if command[:2] == ["php", "-r"]:
+        return "health"
+    return None
+
+
+def consume_secret_stdin(kind):
+    """Consume secret input and retain only safe audit metadata."""
+    payload = sys.stdin.buffer.read()
+    state["secret_inputs"].append(
+        {
+            "kind": kind,
+            "length": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "env_credentials": env_credentials_presence(),
+        }
+    )
+    if state.get("fail_secret_kind") == kind:
+        result("Falha simulada no destino secreto", 1)
+    if state.get("term_secret_kind") == kind:
+        save()
+        os.kill(os.getpid(), signal.SIGTERM)
 
 
 if state.get("fail_on") and a[: len(state["fail_on"])] == state["fail_on"]:
@@ -308,6 +390,9 @@ if a and a[0] == "exec":
     command = a[a.index("--") + 1 :] if "--" in a else []
     if instance_key(name) not in state["instances"]:
         result("Instância ausente", 1)
+    kind = secret_command_kind(command)
+    if kind is not None:
+        consume_secret_stdin(kind)
     if command[:2] == ["sh", "-c"] and "NPROC=" in command[2]:
         config = state["instances"][instance_key(name)]["expanded_config"]
         memory = config["limits.memory"]
