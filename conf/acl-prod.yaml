@@ -1,0 +1,14 @@
+name: acl-prod
+description: ACL para isolamento da rede net-prod contra net-dev
+rules:
+  - action: drop
+    direction: ingress
+    source: 10.10.20.0/24
+    state: enabled
+  - action: drop
+    direction: egress
+    destination: 10.10.20.0/24
+    state: enabled
+config: {}
+used_by:
+  - /1.0/networks/net-prod

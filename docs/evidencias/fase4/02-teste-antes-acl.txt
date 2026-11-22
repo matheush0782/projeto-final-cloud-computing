@@ -1,0 +1,61 @@
+================================================================================
+FASE 4 · ISOLAMENTO E EXPOSIÇÃO — EVIDÊNCIA 02: TESTE ANTES DAS ACLS
+Item do roteiro: 4.2 Primeiro prove que existe o problema
+Data da coleta: 22/11/2026
+Objetivo: Demonstrar que as redes DEV e PROD se enxergam inicialmente devido
+ao roteamento entre as bridges no host Linux (falha de isolamento a ser corrigida)
+================================================================================
+
+1. CRIAÇÃO DA INSTÂNCIA TEMPORÁRIA NA REDE DEV (net-dev):
+$ lxc init ubuntu:24.04 teste-dev -p perfil-base
+Creating teste-dev
+
+$ lxc config device override teste-dev eth0 network=net-dev
+Device eth0 overridden for teste-dev
+
+$ lxc start teste-dev
+$ lxc exec teste-dev -- cloud-init status --wait
+status: done
+
+$ lxc list teste-dev
++-----------+---------+--------------------+------+-----------+-----------+
+|   NAME    |  STATE  |        IPV4        | IPV6 |   TYPE    | SNAPSHOTS |
++-----------+---------+--------------------+------+-----------+-----------+
+| teste-dev | RUNNING | 10.10.20.15 (eth0) |      | CONTAINER | 0         |
++-----------+---------+--------------------+------+-----------+-----------+
+
+$ lxc exec teste-dev -- ip -br addr show eth0
+eth0             UP             10.10.20.15/24 metric 100 
+
+2. TESTE DE CONECTIVIDADE DEV -> BANCO DE PRODUÇÃO (db - 10.10.10.12:3306):
+Comando executado a partir do container teste-dev (rede net-dev 10.10.20.0/24)
+tentando abrir socket TCP na porta 3306 do banco de produção (10.10.10.12):
+
+$ lxc exec teste-dev -- bash -c 'timeout 3 bash -c "echo > /dev/tcp/10.10.10.12/3306" && echo ALCANCOU || echo BLOQUEADO'
+ALCANCOU
+
+3. TESTE DE CONECTIVIDADE ICMP (PING):
+$ lxc exec teste-dev -- ping -c 3 10.10.10.12
+PING 10.10.10.12 (10.10.10.12) 56(84) bytes of data.
+64 bytes from 10.10.10.12: icmp_seq=1 ttl=63 time=0.089 ms
+64 bytes from 10.10.10.12: icmp_seq=2 ttl=63 time=0.065 ms
+64 bytes from 10.10.10.12: icmp_seq=3 ttl=63 time=0.063 ms
+
+--- 10.10.10.12 ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2048ms
+rtt min/avg/max/mdev = 0.063/0.072/0.089/0.011 ms
+
+4. DIAGNÓSTICO TÉCNICO:
+Resultado obtido: ALCANCOU
+Causa: O kernel do host Linux atua como roteador entre as duas bridges virtuais
+gerenciadas pelo LXD (net-prod com gateway 10.10.10.1 e net-dev com gateway 10.10.20.1).
+Como o encaminhamento de pacotes IPv4 (ip_forward) está ativo no host para permitir
+o NAT de saída para a internet, os pacotes originados na sub-rede 10.10.20.0/24 são
+automaticamente roteados para a sub-rede 10.10.10.0/24.
+
+Impacto de segurança: Um desenvolvedor ou aplicação na rede de desenvolvimento (DEV)
+consegue alcançar diretamente a porta 3306 do banco de produção (PROD), violando o
+princípio de isolamento entre ambientes e expondo dados sensíveis.
+
+Ação necessária: Criar e aplicar ACLs de rede no LXD (Fase 4.3) descartando o tráfego
+cruzado (drop) entre as duas sub-redes.
