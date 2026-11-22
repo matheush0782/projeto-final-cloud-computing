@@ -290,7 +290,7 @@ criar_instancia db 12
 lx config device add "${PREFIXO}db" dados disk pool="$POOL" source="${PREFIXO}vol-db" path=/var/lib/mysql
 iniciar db
 lx file push "$RAIZ/conf/config-mariadb.sh" "${PREFIXO}db/root/config-mariadb.sh"
-printf '%s\n' "$SENHA_BANCO" | lx exec "${PREFIXO}db" --mode=non-interactive -- bash /root/config-mariadb.sh --password-stdin "$SUBNET.11" "$DB_NAME" "$DB_USER"
+printf '%s\n' "$SENHA_BANCO" | lx exec "${PREFIXO}db" --mode=non-interactive -- bash /root/config-mariadb.sh --password-stdin "$SUBNET.12" "$SUBNET.11" "$DB_NAME" "$DB_USER"
 criar_instancia app 11
 lx config device add "${PREFIXO}app" uploads disk pool="$POOL" source="${PREFIXO}vol-uploads" path=/var/www/html/wp-content/uploads
 iniciar app

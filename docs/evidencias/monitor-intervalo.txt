@@ -1,0 +1,50 @@
+[19:51:53] Amostra: projeto=final-equipeN ambiente=dev modo=allowlist
+NAME                 STATE      IPV4                     MEMORY         DISK    CPU_SECONDS
+-------------------------------------------------------------------------------------------
+dev-app              RUNNING    10.10.20.11 (eth0)    280.57MiB            -            46s
+dev-db               RUNNING    10.10.20.12 (eth0)    287.27MiB            -            41s
+dev-proxy            RUNNING    10.10.20.10 (eth0)    462.65MiB            -            60s
+Guest df (dev-app):
+PATH            SIZE  USED AVAIL USE%
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda2        40G   15G   23G  39% /
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda2        40G   15G   23G  39% /var/www/html/wp-content/uploads
+Métricas Prometheus filtradas (project=final-equipeN env=dev):
+lxd_cpu_seconds_total{cpu="0",mode="system",name="dev-app",project="final-equipeN",type="container"} 27.994289
+lxd_cpu_seconds_total{cpu="0",mode="user",name="dev-app",project="final-equipeN",type="container"} 18.23549
+lxd_cpu_seconds_total{cpu="0",mode="system",name="dev-db",project="final-equipeN",type="container"} 24.505066
+lxd_cpu_seconds_total{cpu="0",mode="user",name="dev-db",project="final-equipeN",type="container"} 16.918484
+lxd_cpu_seconds_total{cpu="0",mode="system",name="dev-proxy",project="final-equipeN",type="container"} 27.131461
+lxd_cpu_seconds_total{cpu="0",mode="user",name="dev-proxy",project="final-equipeN",type="container"} 33.635786
+lxd_filesystem_avail_bytes{device="",fstype="ext4",mountpoint="/",name="dev-app",project="final-equipeN",type="container"} 2.4423211008e+10
+lxd_filesystem_avail_bytes{device="dev-vol-uploads",fstype="ext4",mountpoint="/var/www/html/wp-content/uploads",name="dev-app",project="final-equipeN",type="container"} 2.4423211008e+10
+lxd_filesystem_avail_bytes{device="",fstype="ext4",mountpoint="/",name="dev-db",project="final-equipeN",type="container"} 2.4423211008e+10
+lxd_filesystem_avail_bytes{device="dev-vol-db",fstype="ext4",mountpoint="/var/lib/mysql",name="dev-db",project="final-equipeN",type="container"} 2.4423211008e+10
+lxd_filesystem_avail_bytes{device="",fstype="ext4",mountpoint="/",name="dev-proxy",project="final-equipeN",type="container"} 2.4423211008e+10
+lxd_memory_MemAvailable_bytes{name="dev-app",project="final-equipeN",type="container"} 4.54598656e+08
+[19:52:00] Amostra: projeto=final-equipeN ambiente=dev modo=allowlist
+NAME                 STATE      IPV4                     MEMORY         DISK    CPU_SECONDS
+-------------------------------------------------------------------------------------------
+dev-app              RUNNING    10.10.20.11 (eth0)    280.57MiB            -            46s
+dev-db               RUNNING    10.10.20.12 (eth0)    287.27MiB            -            41s
+dev-proxy            RUNNING    10.10.20.10 (eth0)    462.65MiB            -            60s
+Guest df (dev-app):
+PATH            SIZE  USED AVAIL USE%
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda2        40G   15G   23G  39% /
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda2        40G   15G   23G  39% /var/www/html/wp-content/uploads
+Métricas Prometheus filtradas (project=final-equipeN env=dev):
+lxd_cpu_seconds_total{cpu="0",mode="system",name="dev-app",project="final-equipeN",type="container"} 27.994289
+lxd_cpu_seconds_total{cpu="0",mode="user",name="dev-app",project="final-equipeN",type="container"} 18.23549
+lxd_cpu_seconds_total{cpu="0",mode="system",name="dev-db",project="final-equipeN",type="container"} 24.505066
+lxd_cpu_seconds_total{cpu="0",mode="user",name="dev-db",project="final-equipeN",type="container"} 16.918484
+lxd_cpu_seconds_total{cpu="0",mode="system",name="dev-proxy",project="final-equipeN",type="container"} 27.131461
+lxd_cpu_seconds_total{cpu="0",mode="user",name="dev-proxy",project="final-equipeN",type="container"} 33.635786
+lxd_filesystem_avail_bytes{device="",fstype="ext4",mountpoint="/",name="dev-app",project="final-equipeN",type="container"} 2.4423211008e+10
+lxd_filesystem_avail_bytes{device="dev-vol-uploads",fstype="ext4",mountpoint="/var/www/html/wp-content/uploads",name="dev-app",project="final-equipeN",type="container"} 2.4423211008e+10
+lxd_filesystem_avail_bytes{device="",fstype="ext4",mountpoint="/",name="dev-db",project="final-equipeN",type="container"} 2.4423211008e+10
+lxd_filesystem_avail_bytes{device="dev-vol-db",fstype="ext4",mountpoint="/var/lib/mysql",name="dev-db",project="final-equipeN",type="container"} 2.4423211008e+10
+lxd_filesystem_avail_bytes{device="",fstype="ext4",mountpoint="/",name="dev-proxy",project="final-equipeN",type="container"} 2.4423211008e+10
+lxd_memory_MemAvailable_bytes{name="dev-app",project="final-equipeN",type="container"} 4.54598656e+08

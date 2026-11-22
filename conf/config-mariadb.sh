@@ -5,7 +5,7 @@ set +v
 set -Eeuo pipefail
 
 uso() {
-    printf 'Uso: %s --password-stdin APP_IP BASE USUARIO (senha de uma linha no stdin)\n' "$0" >&2
+    printf 'Uso: %s --password-stdin DB_IP APP_IP BASE USUARIO (senha de uma linha no stdin)\n' "$0" >&2
     exit 2
 }
 
@@ -35,15 +35,17 @@ validar_identificador() {
     [[ $identificador =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]
 }
 
-(( $# == 4 )) || uso
+(( $# == 5 )) || uso
 [[ $EUID -eq 0 ]] || erro 'este script precisa ser executado como root'
 [[ $1 == --password-stdin ]] || uso
 shift
 
-APP_IP=$1
-BASE=$2
-USUARIO=$3
+DB_IP=$1
+APP_IP=$2
+BASE=$3
+USUARIO=$4
 
+validar_ipv4 "$DB_IP" || erro 'DB_IP deve ser um endereço IPv4 válido'
 validar_ipv4 "$APP_IP" || erro 'APP_IP deve ser um endereço IPv4 válido'
 validar_identificador "$BASE" || erro 'BASE deve ser um identificador de banco MariaDB válido'
 validar_identificador "$USUARIO" || erro 'USUARIO deve ser um identificador de usuário MariaDB válido'
@@ -72,9 +74,9 @@ chown -R mysql:mysql /var/lib/mysql
 chmod 0750 /var/lib/mysql
 
 if grep -Eq '^[[:space:]]*bind-address[[:space:]]*=' "$MARIADB_CONFIG"; then
-    sed -Ei 's/^[[:space:]]*bind-address[[:space:]]*=.*/bind-address = 0.0.0.0/' "$MARIADB_CONFIG"
+    sed -Ei "s/^[[:space:]]*bind-address[[:space:]]*=.*/bind-address = $DB_IP/" "$MARIADB_CONFIG"
 else
-    printf '\n[mysqld]\nbind-address = 0.0.0.0\n' >> "$MARIADB_CONFIG"
+    printf '\n[mysqld]\nbind-address = %s\n' "$DB_IP" >> "$MARIADB_CONFIG"
 fi
 
 if systemctl is-active --quiet mariadb; then
@@ -100,4 +102,4 @@ then
 fi
 unset SENHA EXTRA
 
-printf 'MariaDB configurado para a aplicação em %s.\n' "$APP_IP"
+printf 'MariaDB configurado em %s para a aplicação em %s.\n' "$DB_IP" "$APP_IP"

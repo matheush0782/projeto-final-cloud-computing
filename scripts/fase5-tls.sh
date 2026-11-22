@@ -98,8 +98,9 @@ TMP_CONF="$(mktemp)"
 trap 'rm -f -- "$TMP_CONF"' EXIT
 sed -e "s/__APP_IP__/${SUBNET}.11/g" \
     -e "s/__HTTPS_PORT__/${PORTA_HTTPS}/g" \
+    -e "s/__SITE_HOST__/${IP_SITE}:${PORTA_HTTPS}/g" \
     "$RAIZ/conf/nginx-servico-https.conf" > "$TMP_CONF"
-if grep -qE '__APP_IP__|__HTTPS_PORT__' "$TMP_CONF"; then
+if grep -qE '__APP_IP__|__HTTPS_PORT__|__SITE_HOST__' "$TMP_CONF"; then
     falhar 'O template HTTPS nao foi totalmente renderizado.'
 fi
 lx file push "$TMP_CONF" "$PROXY/etc/nginx/sites-available/servico"
