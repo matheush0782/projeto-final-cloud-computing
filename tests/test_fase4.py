@@ -2,6 +2,7 @@
 """Testes de conformidade e integridade dos artefatos da Fase 4."""
 import json
 from pathlib import Path
+import re
 import unittest
 
 try:
@@ -65,7 +66,7 @@ class Fase4Test(unittest.TestCase):
             self.assertTrue(has_ingress_drop, "acl-dev deve descartar ingress de 10.10.10.0/24")
             self.assertTrue(has_egress_drop, "acl-dev deve descartar egress para 10.10.10.0/24")
 
-    def test_fase4_script_structure(self):
+    def test_fase4_script_structure_and_safety(self):
         script_path = SCRIPTS / "fase4-acls.sh"
         self.assertTrue(script_path.is_file(), "scripts/fase4-acls.sh deve existir")
         content = script_path.read_text(encoding="utf-8")
@@ -76,10 +77,18 @@ class Fase4Test(unittest.TestCase):
         self.assertIn("--apply", content)
         self.assertIn("--test", content)
         self.assertIn("--rollback", content)
+        self.assertIn("--yes", content)
         self.assertIn("acl-prod", content)
         self.assertIn("acl-dev", content)
         self.assertIn("security.acls.default.ingress.action", content)
         self.assertIn("security.acls.default.egress.action", content)
+
+        # Garantias de proteção contra exclusão de instâncias existentes
+        self.assertIn("existe_instancia", content, "Deve verificar existência prévia de instância")
+        self.assertNotIn('lx delete -f "teste-dev"', content, "Não deve conter delete forçado em nome estático teste-dev")
+        self.assertIn("teste-fase4-", content, "Deve gerar nome exclusivo para o container de teste")
+        self.assertIn("criou_instancia", content, "Deve rastrear ownership antes de remover")
+        self.assertIn("exit 1", content, "Falhas nas verificações devem retornar código não zero")
 
     def test_evidencias_fase4_presentes(self):
         arquivos_esperados = [
@@ -101,6 +110,7 @@ class Fase4Test(unittest.TestCase):
         self.assertIn("net-prod", e01)
         self.assertIn("net-dev", e01)
         self.assertIn("proxy", e01)
+        self.assertIn("8443", e01)
 
         e02 = (EVIDENCIAS_FASE4 / "02-teste-antes-acl.txt").read_text(encoding="utf-8")
         self.assertIn("ALCANCOU", e02)
@@ -118,6 +128,7 @@ class Fase4Test(unittest.TestCase):
         self.assertIn("Test-NetConnection", e05)
         self.assertIn("8081", e05)
         self.assertIn("3306", e05)
+        self.assertIn("192.168.56.101", e05, "Evidência deve usar endereço consistente com Host-Only")
 
     def test_documentacao_fase4(self):
         doc = DOCS / "fase4-isolamento.md"
@@ -129,6 +140,10 @@ class Fase4Test(unittest.TestCase):
         self.assertIn("acl-prod", conteudo)
         self.assertIn("acl-dev", conteudo)
         self.assertIn("default", conteudo)
+        self.assertIn("8443", conteudo)
+
+        # Não deve conter links absolutos do tipo file:///
+        self.assertNotIn("file:///", conteudo, "Links na documentação devem ser relativos, não file:///")
 
 
 if __name__ == "__main__":

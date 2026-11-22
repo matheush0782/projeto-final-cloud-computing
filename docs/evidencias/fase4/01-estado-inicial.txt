@@ -98,8 +98,12 @@ LISTEN 0      4096         0.0.0.0:8081      0.0.0.0:*    users:(("lxd",pid=1120
 LISTEN 0      4096         0.0.0.0:8443      0.0.0.0:*    users:(("lxd",pid=1120,fd=16))
 LISTEN 0      4096         0.0.0.0:8444      0.0.0.0:*    users:(("lxd",pid=1120,fd=18))
 
-# ANÁLISE:
-# - Porta 8081 (HTTP WordPress): exposta pelo proxy LXD (0.0.0.0) -> VÁLIDA
-# - Porta 8444 (HTTPS WordPress): exposta pelo proxy LXD (0.0.0.0) -> VÁLIDA
-# - Porta 8443 (API/UI LXD): gerenciamento do LXD (0.0.0.0) -> VÁLIDA
-# - Porta 3306 (MariaDB): NÃO está exposta na interface do host -> CONFORME ITEM 4.1
+# ANÁLISE DE SEGURANÇA E EXPOSIÇÃO DE PORTAS:
+# - Porta 8081 (HTTP WordPress): exposta pelo proxy LXD (0.0.0.0) -> VÁLIDA (serviço web público)
+# - Porta 8444 (HTTPS WordPress): exposta pelo proxy LXD (0.0.0.0) -> VÁLIDA (serviço web público seguro)
+# - Porta 8443 (API/UI LXD): porta do daemon LXD (core.https_address).
+#   ATENÇÃO: A porta 8443 pertence exclusivamente ao plano de controle e gerenciamento do LXD.
+#   Ela NÃO faz parte do serviço da aplicação WordPress. O acesso requer autenticação mútua TLS
+#   (tokens de confiança / certificados de cliente gerados na Fase 5). Recomenda-se restringir
+#   seu bind para a interface de loopback ou rede de gerência se o acesso externo não for necessário.
+# - Porta 3306 (MariaDB): NÃO está exposta na interface do host e não possui dispositivo proxy -> CONFORME ITEM 4.1

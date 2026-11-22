@@ -10,6 +10,7 @@ Este documento registra a implementação, automação e validação da **Fase 4
 2. **Proteger o banco de dados**: demonstrar e garantir que o MariaDB (`db`, IP `10.10.10.12`, porta 3306) **não** é acessível diretamente fora do host nem a partir de ambientes não autorizados.
 3. **Isolar Desenvolvimento e Produção**: comprovar que instâncias em `net-dev` (`10.10.20.0/24`) não conseguem se comunicar com as instâncias em `net-prod` (`10.10.10.0/24`), e vice-versa.
 4. **Preservar a conectividade legítima**: garantir que as instâncias continuem com saída para a internet (NAT) e que o proxy reverso continue roteando requisições internas para a aplicação (`10.10.10.11:80`).
+5. **Diferenciar o plano de gerenciamento (LXD) do serviço**: delimitar o papel da porta 8443 (API/UI do LXD) em relação às portas de serviço da aplicação (8081/8444).
 
 ---
 
@@ -17,11 +18,11 @@ Este documento registra a implementação, automação e validação da **Fase 4
 
 ### 2.1 Por que duas bridges não são isoladas por padrão?
 
-No Linux, ao criar duas bridges virtuais no mesmo host (`net-prod` em `10.10.10.1/24` e `net-dev` em `10.10.20.1/24`), o kernel do host atua como roteador entre ambas. Uma vez que o encaminhamento IPv4 (`net.ipv4.ip_forward = 1`) fica habilitado para prover saída NAT à internet para os containers, os pacotes trafegam livremente entre as bridges através da tabela de roteamento local do host.
+No Linux, ao criar duas bridges virtuais no mesmo host (`net-prod` em `10.10.10.1/24` e `net-dev` em `10.10.20.1/24`), o kernel do host atua como roteador entre ambas. Como o encaminhamento IPv4 (`net.ipv4.ip_forward = 1`) fica habilitado para prover saída NAT à internet para os containers, os pacotes trafegam livremente entre as bridges através da tabela de roteamento local do host.
 
 ### 2.2 Demonstração da Vulnerabilidade (Fase 4.2)
 
-Ao subir uma instância temporária `teste-dev` na rede `net-dev` e executar uma tentativa de conexão TCP contra a porta 3306 do banco de produção (`10.10.10.12`), o resultado obtido é:
+Ao subir uma instância temporária de teste na rede `net-dev` e executar uma tentativa de conexão TCP contra a porta 3306 do banco de produção (`10.10.10.12`), o resultado obtido é:
 
 ```bash
 $ lxc exec teste-dev -- bash -c 'timeout 3 bash -c "echo > /dev/tcp/10.10.10.12/3306" && echo ALCANCOU || echo BLOQUEADO'
@@ -139,19 +140,25 @@ used_by:
 
 ## 5. Script de Automação (`scripts/fase4-acls.sh`)
 
-O script `scripts/fase4-acls.sh` automatiza todo o ciclo de vida das ACLs de forma idempotente, sem duplicar regras e integrando-se aos padrões de projeto do repositório.
+O script `scripts/fase4-acls.sh` automatiza todo o ciclo de vida das ACLs com garantias de proteção para recursos existentes e validação estrita.
 
-### 5.1 Modos de Execução
+### 5.1 Melhorias de Segurança e Confiabilidade
+1. **Proteção contra exclusão de instâncias existentes**: o script gera identificadores temporários únicos (`teste-fase4-<timestamp>-<random>`), checa previamente se o nome já existe antes de iniciar e **nunca** executa comandos `delete` cegos sobre nomes estáticos.
+2. **Limpeza atômica e segura**: a rotina de exclusão só atua sobre a instância efetivamente criada pela própria execução atual.
+3. **Validação estrita de testes**: as verificações obrigatórias (bloqueio do banco, saída para a internet e resposta do proxy) interrompem a execução com código de saída diferente de zero (`exit 1`) caso ocorra qualquer falha, impedindo falsos sucessos.
+4. **Rollback seletivo**: a rotina de rollback só desvincula `security.acls` se a rede estiver apontando para a respectiva ACL do script, e só exclui a ACL se ela não estiver em uso por outros recursos (`used_by` vazio).
+
+### 5.2 Modos de Execução
 
 | Parâmetro | Finalidade |
 |---|---|
 | `./scripts/fase4-acls.sh --apply` | Aplica as regras de isolamento e associa às redes (padrão se omitido). |
 | `./scripts/fase4-acls.sh --status` | Inspeciona ACLs, regras e configurações ativas em `net-prod` e `net-dev`. |
 | `./scripts/fase4-acls.sh --dry-run` | Simula as ações sem efetuar qualquer modificação no LXD. |
-| `./scripts/fase4-acls.sh --test` | Cria container de teste em `net-dev`, valida bloqueio ao banco, testa saída internet e verifica WordPress. |
-| `./scripts/fase4-acls.sh --rollback` | Remove a associação das redes e exclui as ACLs com segurança. |
+| `./scripts/fase4-acls.sh --test` | Cria container de teste exclusivo em `net-dev`, valida bloqueio ao banco, testa saída internet e verifica WordPress. |
+| `./scripts/fase4-acls.sh --rollback [--yes]` | Remove a associação das redes e exclui as ACLs se não estiverem em uso. |
 
-### 5.2 Exemplo de Execução do Script
+### 5.3 Exemplo de Execução do Script
 
 ```bash
 # Simular antes de aplicar
@@ -163,7 +170,7 @@ bash scripts/fase4-acls.sh --apply
 # Conferir o status
 bash scripts/fase4-acls.sh --status
 
-# Executar a bateria de testes automatizados
+# Executar a bateria de testes automatizados com validação estrita
 bash scripts/fase4-acls.sh --test
 ```
 
@@ -184,11 +191,25 @@ Conforme exigido pelo Roteiro de Implementação da disciplina, a tabela abaixo 
 
 ---
 
-## 7. Validação de Exposição de Portas (Fase 4.1)
+## 7. Validação de Exposição de Portas e Delimitação da Porta 8443
 
-Apenas o container `proxy` deve ser publicado para o exterior.
+### 7.1 Diferenciação entre Serviço da Aplicação e Plano de Gerenciamento
 
-### 7.1 Verificação dos Dispositivos LXD
+É fundamental não confundir o tráfego da aplicação com o acesso administrativo ao daemon LXD:
+
+1. **Portas do Serviço WordPress (Encaminhadas pelo Proxy Reverso)**:
+   - **Porta 8081 (HTTP)**: porta do serviço web aberta pelo dispositivo `porta-http` no container `proxy`.
+   - **Porta 8444 (HTTPS)**: porta do serviço web seguro com certificado TLS assinado pela CA da equipe (Fase 5), gerenciada pelo dispositivo `porta-https` no container `proxy`.
+   - Ambas são as únicas portas públicas da aplicação.
+2. **Porta do Banco de Dados (MariaDB)**:
+   - **Porta 3306**: estritamente interna ao container `db` na sub-rede `10.10.10.0/24`. A instância `db` não possui nenhum dispositivo do tipo proxy e sua porta nunca é exposta externamente na VM ou no host.
+3. **Porta de Gerenciamento do LXD (API REST / Web UI)**:
+   - **Porta 8443**: pertence exclusivamente ao daemon LXD no host (`core.https_address :8443`).
+   - Essa porta **não** pertence ao WordPress e **não** é evidência de HTTPS do site.
+   - O acesso a ela exige autenticação mútua TLS (tokens de confiança e certificados clientes registrados via `lxc config trust add`).
+   - Por segurança, caso a gestão remota não seja necessária fora da própria VM, recomenda-se restringir o endereço de bind para loopback (`127.0.0.1:8443`) ou limitá-la via firewall do sistema operacional da VM.
+
+### 7.2 Verificação dos Dispositivos LXD
 ```bash
 $ lxc config device list proxy
 eth0
@@ -203,18 +224,37 @@ root
 ```
 *Comprovação: A instância `db` possui apenas dispositivos `disk` e `nic`; não há dispositivo `proxy` cadastrado.*
 
-### 7.2 Teste do Notebook do Aluno (PowerShell no Windows)
+### 7.3 Topologias de Rede do VirtualBox e Teste do Notebook
+
+No ambiente de laboratório, a comunicação entre o notebook do aluno e a VM `cloud-lab` pode ocorrer em duas topologias:
+
+#### Cenário A: Adaptador Exclusivo de Hospedeiro (Host-Only) / Bridge
+Nesse cenário, a VM recebe um endereço IP na mesma sub-rede do adaptador do host (por exemplo, host em `192.168.56.1` e VM em `192.168.56.101`):
+
 ```powershell
 # Porta 8081 (HTTP WordPress): DEVE RESPONDER TRUE
-Test-NetConnection <IP-DA-VM> -Port 8081
+Test-NetConnection 192.168.56.101 -Port 8081
 # TcpTestSucceeded : True
 
 # Porta 8444 (HTTPS WordPress): DEVE RESPONDER TRUE
-Test-NetConnection <IP-DA-VM> -Port 8444
+Test-NetConnection 192.168.56.101 -Port 8444
 # TcpTestSucceeded : True
 
 # Porta 3306 (MariaDB): DEVE RESPONDER FALSE
-Test-NetConnection <IP-DA-VM> -Port 3306
+Test-NetConnection 192.168.56.101 -Port 3306
+# TcpTestSucceeded : False
+```
+
+#### Cenário B: Adaptador NAT com Redirecionamento de Portas (Port Forwarding)
+Nesse cenário, a VM possui IP interno NAT (`10.0.2.15`), mas o VirtualBox redireciona as portas para a interface de loopback do hospedeiro:
+
+```powershell
+# Porta 8081 (HTTP WordPress no loopback): DEVE RESPONDER TRUE
+Test-NetConnection 127.0.0.1 -Port 8081
+# TcpTestSucceeded : True
+
+# Porta 3306 (MariaDB): DEVE RESPONDER FALSE
+Test-NetConnection 127.0.0.1 -Port 3306
 # TcpTestSucceeded : False
 ```
 
@@ -222,16 +262,20 @@ Test-NetConnection <IP-DA-VM> -Port 3306
 
 ## 8. Procedimento de Restauração / Rollback
 
-Caso seja necessário remover as ACLs para manutenção ou diagnóstico temporário:
+O script realiza o rollback com segurança, verificando dependências e exigindo confirmação:
 
 ```bash
+# Com confirmação interativa:
 bash scripts/fase4-acls.sh --rollback
+
+# Não interativo:
+bash scripts/fase4-acls.sh --rollback --yes
 ```
 
 Ou manualmente via comandos LXD:
 
 ```bash
-# 1. Desvincular das redes
+# 1. Desvincular das redes (somente se vinculadas a acl-prod / acl-dev)
 lxc network unset net-prod security.acls
 lxc network unset net-prod security.acls.default.ingress.action
 lxc network unset net-prod security.acls.default.egress.action
@@ -240,19 +284,30 @@ lxc network unset net-dev security.acls
 lxc network unset net-dev security.acls.default.ingress.action
 lxc network unset net-dev security.acls.default.egress.action
 
-# 2. Excluir as ACLs
+# 2. Excluir as ACLs (se não utilizadas por outros recursos)
 lxc network acl delete acl-prod
 lxc network acl delete acl-dev
 ```
 
 ---
 
-## 9. Evidências Coletadas
+## 9. Status de Validação: Local vs VM Real
+
+- **Validações Locais Concluídas**:
+  - Sintaxe de shell verificada em todos os scripts (`bash -n`).
+  - Estrutura YAML dos arquivos `conf/acl-prod.yaml` e `conf/acl-dev.yaml` validada por testes unitários em `tests/test_fase4.py`.
+  - Tratamento de parâmetros, geração de nomes exclusivos e proteção contra exclusão implementados e testados.
+- **Validações Pendentes na VM**:
+  - A aplicação real das regras de kernel (`nftables`/`OVS`) e o teste com instâncias ativas do LXD devem ser validados na VM Ubuntu 24.04 do laboratório com `bash scripts/fase4-acls.sh --test`.
+
+---
+
+## 10. Evidências Coletadas
 
 Os registros de terminal completos estão organizados na pasta `docs/evidencias/fase4/`:
 
-1. [01-estado-inicial.txt](file:///c:/Users/Usuario/Desktop/Faculdade/projeto-final-cloud-computing/docs/evidencias/fase4/01-estado-inicial.txt): Estado das redes, instâncias e portas antes da alteração.
-2. [02-teste-antes-acl.txt](file:///c:/Users/Usuario/Desktop/Faculdade/projeto-final-cloud-computing/docs/evidencias/fase4/02-teste-antes-acl.txt): Teste demonstrando o problema de isolamento (`ALCANCOU`).
-3. [03-acls-aplicadas.txt](file:///c:/Users/Usuario/Desktop/Faculdade/projeto-final-cloud-computing/docs/evidencias/fase4/03-acls-aplicadas.txt): Criação das regras e saída integral de `lxc network acl show acl-prod`.
-4. [04-teste-depois-acl.txt](file:///c:/Users/Usuario/Desktop/Faculdade/projeto-final-cloud-computing/docs/evidencias/fase4/04-teste-depois-acl.txt): Teste confirmando o bloqueio (`BLOQUEADO`), comparação lado a lado e saída para internet.
-5. [05-validacao-servico.txt](file:///c:/Users/Usuario/Desktop/Faculdade/projeto-final-cloud-computing/docs/evidencias/fase4/05-validacao-servico.txt): Validação do WordPress no proxy e testes das portas externas via PowerShell e Linux.
+1. [01-estado-inicial.txt](evidencias/fase4/01-estado-inicial.txt): Estado das redes, instâncias e portas antes da alteração.
+2. [02-teste-antes-acl.txt](evidencias/fase4/02-teste-antes-acl.txt): Teste demonstrando o problema de isolamento (`ALCANCOU`).
+3. [03-acls-aplicadas.txt](evidencias/fase4/03-acls-aplicadas.txt): Criação das regras e saída integral de `lxc network acl show acl-prod`.
+4. [04-teste-depois-acl.txt](evidencias/fase4/04-teste-depois-acl.txt): Teste confirmando o bloqueio (`BLOQUEADO`), comparação lado a lado e saída para internet.
+5. [05-validacao-servico.txt](evidencias/fase4/05-validacao-servico.txt): Validação do WordPress no proxy e testes das portas externas via PowerShell e Linux.
