@@ -32,28 +32,69 @@ list_instance_snaps() {
     echo "[ERRO] Falha ao listar snapshots de $inst:"; cat "$tmp.err" >&2; return 1
   fi
   cut -d, -f1 "$tmp" | grep -v '^$' | sort -r
-  return 0
-}
-list_volume_snaps() {
-  local tmp="$1" vol="$2"
-  if ! lxc storage volume snapshot list --project "$PROJECT" "$POOL" "$vol" --format csv > "$tmp" 2>"$tmp.err"; then
-    echo "[ERRO] Falha ao listar snapshots do volume $vol:"; cat "$tmp.err" >&2; return 1
+  #!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT="${PROJECT:-final-equipeN}"
+POOL="${POOL:-pool-final}"
+KEEP="${KEEP:-7}"
+DRY_RUN=1; YES=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    --execute) DRY_RUN=0 ;;
+    --yes) YES=1 ;;
+    --help) echo "Uso: $0 [--dry-run] [--execute --yes]"; echo "KEEP: KEEP=10 $0 --dry-run"; exit 0 ;;
+    *) echo "[ERRO] Arg desconhecido: $arg" >&2; exit 2 ;;
+  esac
+done
+
+if ! [[ "$KEEP" =~ ^[0-9]+$ ]]; then echo "[ERRO] KEEP deve ser inteiro >=0, recebido: $KEEP" >&2; exit 2; fi
+command -v lxc >/dev/null || { echo "[ERRO] lxc nao encontrado" >&2; exit 1; }
+
+INSTANCES=("proxy" "app" "db" "dev-proxy" "dev-app" "dev-db")
+VOLUMES=("vol-db" "vol-uploads" "dev-vol-db" "dev-vol-uploads")
+FAILED=0
+
+# CORRECAO: usa arquivo temporario + checa exit code explicitamente.
+# Se lxc falhar, retorna 1 e NAO retorna lista vazia.
+list_snaps_to_file() {
+  local kind="$1" name="$2" outfile="$3" errfile="$4"
+  if [ "$kind" = "instance" ]; then
+    if ! lxc snapshot list --project "$PROJECT" "$name" --format csv > "$outfile" 2> "$errfile"; then
+      echo "[ERRO] Falha ao listar snapshots de $name:" >&2; cat "$errfile" >&2; return 1
+    fi
+  else
+    if ! lxc storage volume snapshot list --project "$PROJECT" "$POOL" "$name" --format csv > "$outfile" 2> "$errfile"; then
+      echo "[ERRO] Falha ao listar snapshots do volume $name:" >&2; cat "$errfile" >&2; return 1
+    fi
   fi
-  cut -d, -f1 "$tmp" | grep -v '^$' | sort -r
   return 0
 }
 
 clean_one() {
-  local kind="$1" name="$2" tmp
-  tmp="$(mktemp)"
+  local kind="$1" name="$2"
+  local tmp errf
+  tmp="$(mktemp)"; errf="$(mktemp)"
   echo "[INFO] $kind $name - mantendo $KEEP mais recentes"
-  local snaps=()
-  if [ "$kind" = "instance" ]; then
-    if ! mapfile -t snaps < <(list_instance_snaps "$tmp" "$name"); then echo "[ERRO] Abortando limpeza de $name" >&2; FAILED=1; rm -f "$tmp" "$tmp.err"; return 1; fi
-  else
-    if ! mapfile -t snaps < <(list_volume_snaps "$tmp" "$name"); then echo "[ERRO] Abortando limpeza de $name" >&2; FAILED=1; rm -f "$tmp" "$tmp.err"; return 1; fi
+
+  # Se falhar, aborta este recurso, nao finge que tem 0 snapshots
+  if ! list_snaps_to_file "$kind" "$name" "$tmp" "$errf"; then
+    echo "[ERRO] Abortando limpeza de $name - consulta falhou, nao vou assumir lista vazia" >&2
+    FAILED=1; rm -f "$tmp" "$errf"; return 1
   fi
-  rm -f "$tmp" "$tmp.err"
+
+  # Le arquivo linha a linha, sem mapfile + process substitution
+  local snaps=() line
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -z "$line" ] && continue
+    # csv: primeira coluna e o nome
+    snaps+=("$(echo "$line" | cut -d, -f1)")
+  done < "$tmp"
+  rm -f "$tmp" "$errf"
+
+  # Ordena do mais novo para o mais velho (nome tem data)
+  IFS=$'\n' snaps=($(printf "%s\n" "${snaps[@]}" | sort -r)); unset IFS
   local total=${#snaps[@]}
   echo "[INFO]  $name tem $total snapshots"
   if [ "$total" -le "$KEEP" ]; then echo "[OK]  Nada a remover em $name"; return 0; fi
@@ -75,10 +116,5 @@ for i in "${INSTANCES[@]}"; do clean_one "instance" "$i" || true; done
 for v in "${VOLUMES[@]}"; do clean_one "volume" "$v" || true; done
 
 if [ "$DRY_RUN" -eq 1 ]; then echo "[DRY-RUN] Nenhum snapshot apagado. Para apagar: $0 --execute --yes"; fi
-if [ "$FAILED" -ne 0 ]; then echo "[ERRO] Limpeza com falhas" >&2; exit 1; fi
+[ "$FAILED" -eq 0 ] || { echo "[ERRO] Limpeza com falhas" >&2; exit 1; }
 echo "[OK] Limpeza concluida"
-
-./scripts/04-limpeza.sh --dry-run
-KEEP=10 ./scripts/04-limpeza.sh --dry-run
-./scripts/04-limpeza.sh --execute --yes
-

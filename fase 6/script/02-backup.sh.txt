@@ -4,7 +4,6 @@ set -Eeuo pipefail
 PROJECT="${PROJECT:-final-equipeN}"
 POOL="${POOL:-pool-final}"
 BASE="${BACKUP_BASE:-/opt/backups/fase-6}"
-# Diretorio unico: data + PID + random. Nunca reutiliza.
 TS="$(date +%Y%m%d-%H%M%S)-$$-$RANDOM"
 DEST="$BASE/$TS"
 
@@ -20,12 +19,20 @@ for arg in "$@"; do case "$arg" in --dry-run) DRY_RUN=1 ;; --help) echo "Uso: $0
 command -v lxc >/dev/null || { echo "[ERRO] lxc nao encontrado" >&2; exit 1; }
 command -v sha256sum >/dev/null || { echo "[ERRO] sha256sum nao encontrado" >&2; exit 1; }
 
+get_state() {
+  local out rc
+  out="$(lxc info --project "$PROJECT" "$1" 2>&1)"; rc=$?
+  if [ $rc -ne 0 ]; then echo "ERROR"; echo "[ERRO] Falha ao consultar $1: $out" >&2; return 1; fi
+  if echo "$out" | grep -qi "^Status:.*Running"; then echo "Running"; return 0; fi
+  if echo "$out" | grep -qi "^Status:.*Stopped"; then echo "Stopped"; return 0; fi
+  echo "ERROR"; return 1
+}
+
 declare -A WAS_RUNNING=()
-is_running() { lxc info --project "$PROJECT" "$1" 2>/dev/null | grep -qi "^Status:.*Running"; }
 restore_state() {
   for inst in "${CONSUMERS[@]}"; do
-    if [[ "${WAS_RUNNING[$inst]:-0}" == "1" ]]; then
-      echo "[INFO] Religando $inst (estava ligado antes)"
+    if [[ "${WAS_RUNNING[$inst]:-}" == "Running" ]]; then
+      echo "[INFO] Religando $inst (estava Running antes)"
       lxc start --project "$PROJECT" "$inst" || echo "[ERRO] Falha ao religar $inst" >&2
     fi
   done
@@ -34,22 +41,21 @@ trap restore_state EXIT
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "[DRY-RUN] Backup seria criado em $DEST"
-  echo "[DRY-RUN] Pararia consumidores, exportaria 6 instancias + 4 volumes com --project $PROJECT, geraria MANIFEST + sha256"
+  echo "[DRY-RUN] Pararia consumidores, exportaria instancias com --instance-only + volumes separados, geraria MANIFEST + sha256"
   trap - EXIT; exit 0
 fi
 
-# RECUSA se ja existir. Nunca sobrescreve.
-if [ -e "$DEST" ]; then echo "[ERRO] Destino $DEST ja existe. Abortando para nao sobrescrever." >&2; exit 1; fi
+if [ -e "$DEST" ]; then echo "[ERRO] Destino $DEST ja existe. Abortando." >&2; exit 1; fi
 mkdir -p "$DEST/prod/instancias" "$DEST/prod/volumes" "$DEST/dev/instancias" "$DEST/dev/volumes" || { echo "[ERRO] Falha ao criar $DEST" >&2; exit 1; }
 
-# Backup consistente: registra estado, para consumidores, exporta, religa via trap
-echo "[INFO] Registrando estado original e parando consumidores para export consistente"
+echo "[INFO] Registrando estado e parando consumidores para export consistente"
 for inst in "${CONSUMERS[@]}"; do
-  if is_running "$inst"; then WAS_RUNNING["$inst"]=1; else WAS_RUNNING["$inst"]=0; fi
+  st="$(get_state "$inst")" || { echo "[ERRO] Abortando, nao foi possivel determinar estado de $inst" >&2; exit 1; }
+  WAS_RUNNING["$inst"]="$st"
 done
 for inst in "${CONSUMERS[@]}"; do
-  if [[ "${WAS_RUNNING[$inst]}" == "1" ]]; then
-    if ! lxc stop --project "$PROJECT" "$inst"; then echo "[ERRO] Falha ao parar $inst. Abortando backup." >&2; exit 1; fi
+  if [[ "${WAS_RUNNING[$inst]}" == "Running" ]]; then
+    lxc stop --project "$PROJECT" "$inst" || { echo "[ERRO] Falha ao parar $inst. Abortando backup." >&2; exit 1; }
   fi
 done
 
@@ -59,13 +65,18 @@ FAILED=0
 
 export_inst() {
   local env="$1" inst="$2" out="$DEST/$env/instancias/${env}-${inst}-${TS}.tar.gz"
-  echo "[INFO] Exportando instancia $inst"
-  if lxc export --project "$PROJECT" "$inst" "$out" && [ -s "$out" ]; then echo "[OK] $inst -> $out" >> "$MANIFEST"; echo "[OK] $inst"; else echo "[ERRO] Falha export $inst" >&2; echo "[FALHA] instancia $inst" >> "$MANIFEST"; FAILED=1; fi
+  echo "[INFO] Exportando instancia $inst com --instance-only"
+  # CORRECAO: --instance-only, volume exportado separadamente abaixo
+  if lxc export --project "$PROJECT" --instance-only "$inst" "$out" && [ -s "$out" ]; then
+    echo "[OK] instancia $inst -> $out" >> "$MANIFEST"; echo "[OK] $inst"
+  else echo "[ERRO] Falha export $inst" >&2; echo "[FALHA] instancia $inst" >> "$MANIFEST"; FAILED=1; fi
 }
 export_vol() {
   local env="$1" vol="$2" out="$DEST/$env/volumes/${env}-${vol}-${TS}.tar.gz"
   echo "[INFO] Exportando volume $vol"
-  if lxc storage volume export --project "$PROJECT" "$POOL" "$vol" "$out" && [ -s "$out" ]; then echo "[OK] volume $vol -> $out" >> "$MANIFEST"; echo "[OK] $vol"; else echo "[ERRO] Falha export volume $vol" >&2; echo "[FALHA] volume $vol" >> "$MANIFEST"; FAILED=1; fi
+  if lxc storage volume export --project "$PROJECT" "$POOL" "$vol" "$out" && [ -s "$out" ]; then
+    echo "[OK] volume $vol -> $out" >> "$MANIFEST"; echo "[OK] $vol"
+  else echo "[ERRO] Falha export volume $vol" >&2; echo "[FALHA] volume $vol" >> "$MANIFEST"; FAILED=1; fi
 }
 
 for i in "${INSTANCES_PROD[@]}"; do export_inst "prod" "$i"; done
@@ -73,15 +84,9 @@ for i in "${INSTANCES_DEV[@]}"; do export_inst "dev" "$i"; done
 for v in "${VOLUMES_PROD[@]}"; do export_vol "prod" "$v"; done
 for v in "${VOLUMES_DEV[@]}"; do export_vol "dev" "$v"; done
 
-# Checksums + validacao
 (cd "$DEST" && find . -name "*.tar.gz" -exec sha256sum {} + > sha256sums.txt) || { echo "[ERRO] Falha ao gerar checksums" >&2; FAILED=1; }
 if [ "$FAILED" -eq 0 ]; then
   if (cd "$DEST" && sha256sum -c sha256sums.txt >/dev/null); then echo "[OK] Checksums validados"; else echo "[ERRO] Checksum nao confere" >&2; FAILED=1; fi
 fi
-
-if [ "$FAILED" -ne 0 ]; then echo "[ERRO] Backup com FALHAS. Veja $MANIFEST" >&2; exit 1; fi
+[ "$FAILED" -eq 0 ] || { echo "[ERRO] Backup com FALHAS. Veja $MANIFEST" >&2; exit 1; }
 echo "[OK] Backup concluido em $DEST"
-echo "Manifesto: $MANIFEST"
-
-./scripts/02-backup.sh --dry-run
-./scripts/02-backup.sh
