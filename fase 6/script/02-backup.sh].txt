@@ -1,10 +1,75 @@
-#!/bin/bash
-# Fase 6 - Backup completo
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
 PROJECT="final-equipeN"
-DATA=$(date +%Y%m%d-%H%M)
-DIR="/opt/backups/fase-6/$DATA"
-mkdir -p $DIR
-lxc export --project $PROJECT db $DIR/db-$DATA.tar.gz
-lxc export --project $PROJECT app $DIR/app-$DATA.tar.gz
-lxc export --project $PROJECT proxy $DIR/proxy-$DATA.tar.gz
-echo "Backup salvo em $DIR"
+POOL="pool-final"
+BASE="${BACKUP_BASE:-/opt/backups/fase-6}"
+TS="$(date +%Y%m%d-%H%M%S)"
+DEST="$BASE/$TS"
+
+INSTANCES_PROD=("proxy" "app" "db")
+INSTANCES_DEV=("dev-proxy" "dev-app" "dev-db")
+VOLUMES_PROD=("vol-db" "vol-uploads")
+VOLUMES_DEV=("dev-vol-db" "dev-vol-uploads")
+
+DRY_RUN=0
+for arg in "$@"; do case "$arg" in --dry-run) DRY_RUN=1 ;; --help) echo "Uso: $0 [--dry-run]"; exit 0 ;; *) echo "[ERRO] Arg desconhecido: $arg" >&2; exit 2 ;; esac; done
+
+log() { echo "[INFO] $*"; }
+ok() { echo "[OK] $*"; }
+err() { echo "[ERRO] $*" >&2; }
+
+command -v lxc >/dev/null || { err "lxc nao encontrado"; exit 1; }
+command -v sha256sum >/dev/null || { err "sha256sum nao encontrado"; exit 1; }
+
+if [ "$DRY_RUN" -eq 0 ]; then
+  mkdir -p "$DEST/prod/instancias" "$DEST/prod/volumes" "$DEST/dev/instancias" "$DEST/dev/volumes" || { err "Falha ao criar $DEST"; exit 1; }
+  [ -d "$DEST" ] || { err "Diretorio $DEST nao criado"; exit 1; }
+fi
+
+MANIFEST="$DEST/MANIFEST.txt"
+FAILED=0
+
+write_manifest() {
+  if [ "$DRY_RUN" -eq 1 ]; then return 0; fi
+  echo "$*" >> "$MANIFEST"
+}
+
+if [ "$DRY_RUN" -eq 0 ]; then
+  { echo "Backup Fase 6"; echo "Data: $TS"; echo "Projeto: $PROJECT"; echo "Pool: $POOL"; echo "Destino: $DEST"; echo "---"; } > "$MANIFEST"
+fi
+
+export_instance() {
+  local env="$1" inst="$2" out="$DEST/$env/instancias/${env}-${inst}-${TS}.tar.gz"
+  log "Exportando instancia $inst -> $out"
+  if [ "$DRY_RUN" -eq 1 ]; then echo "[DRY-RUN] lxc export --project $PROJECT $inst $out"; write_manifest "[DRY-RUN] $inst"; return 0; fi
+  if lxc export --project "$PROJECT" "$inst" "$out"; then
+    if [ -s "$out" ]; then ok "$inst ($(du -h "$out" | cut -f1))"; write_manifest "[OK] instancia $inst -> $out"; else err "Arquivo vazio: $out"; FAILED=1; write_manifest "[FALHA-VAZIO] $inst"; fi
+  else err "Falha export $inst"; FAILED=1; write_manifest "[FALHA] instancia $inst"; fi
+}
+
+export_volume() {
+  local env="$1" vol="$2" out="$DEST/$env/volumes/${env}-${vol}-${TS}.tar.gz"
+  log "Exportando volume $vol -> $out"
+  if [ "$DRY_RUN" -eq 1 ]; then echo "[DRY-RUN] lxc storage volume export $POOL $vol $out"; return 0; fi
+  # Sintaxe LXD: lxc storage volume export <pool> <volume> <arquivo>
+  if lxc storage volume export "$POOL" "$vol" "$out"; then
+    if [ -s "$out" ]; then ok "$vol ($(du -h "$out" | cut -f1))"; write_manifest "[OK] volume $vol -> $out"; else err "Arquivo vazio: $out"; FAILED=1; write_manifest "[FALHA-VAZIO] volume $vol"; fi
+  else err "Falha export volume $vol"; FAILED=1; write_manifest "[FALHA] volume $vol"; fi
+}
+
+for i in "${INSTANCES_PROD[@]}"; do export_instance "prod" "$i"; done
+for i in "${INSTANCES_DEV[@]}"; do export_instance "dev" "$i"; done
+for v in "${VOLUMES_PROD[@]}"; do export_volume "prod" "$v"; done
+for v in "${VOLUMES_DEV[@]}"; do export_volume "dev" "$v"; done
+
+if [ "$DRY_RUN" -eq 0 ]; then
+  (cd "$DEST" && find . -name "*.tar.gz" -exec sha256sum {} + > sha256sums.txt) || { err "Falha ao gerar checksums"; FAILED=1; }
+  write_manifest "---"
+  write_manifest "Arquivos:"
+  find "$DEST" -name "*.tar.gz" >> "$MANIFEST" || true
+fi
+
+if [ "$FAILED" -ne 0 ]; then err "Backup concluido com FALHAS. Veja $MANIFEST. Nao considere como backup completo."; exit 1; fi
+ok "Backup concluido em $DEST"
+[ "$DRY_RUN" -eq 0 ] && echo "Manifesto: $MANIFEST"
