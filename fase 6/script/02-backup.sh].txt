@@ -1,0 +1,10 @@
+#!/bin/bash
+# Fase 6 - Backup completo
+PROJECT="final-equipeN"
+DATA=$(date +%Y%m%d-%H%M)
+DIR="/opt/backups/fase-6/$DATA"
+mkdir -p $DIR
+lxc export --project $PROJECT db $DIR/db-$DATA.tar.gz
+lxc export --project $PROJECT app $DIR/app-$DATA.tar.gz
+lxc export --project $PROJECT proxy $DIR/proxy-$DATA.tar.gz
+echo "Backup salvo em $DIR"

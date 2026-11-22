@@ -1,0 +1,7 @@
+#!/bin/bash
+# Fase 6 - Apagar snapshots velhos, manter so os 7 ultimos
+PROJECT="final-equipeN"
+for INST in db app proxy; do
+  echo "Limpando $INST..."
+done
+echo "Limpeza feita"

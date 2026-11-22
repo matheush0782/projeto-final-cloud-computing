@@ -1,0 +1,10 @@
+#!/bin/bash
+# Fase 6 - Voltar no tempo
+# Uso: ./03-restore.sh app snap-20251122-1800
+PROJECT="final-equipeN"
+INST=$1
+SNAP=$2
+lxc stop --project $PROJECT $INST
+lxc restore --project $PROJECT $INST $SNAP
+lxc start --project $PROJECT $INST
+echo "Restaurado!"

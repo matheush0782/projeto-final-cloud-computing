@@ -1,0 +1,8 @@
+#!/bin/bash
+# Fase 6 - Snapshots LXD
+PROJECT="final-equipeN"
+DATA=$(date +%Y%m%d-%H%M)
+lxc snapshot --project $PROJECT db snap-$DATA
+lxc snapshot --project $PROJECT app snap-$DATA
+lxc snapshot --project $PROJECT proxy snap-$DATA
+echo "Pronto! Snapshots criados"
