@@ -1,0 +1,50 @@
+=== LIMITES DE RECURSOS - FASE 8 ===
+Sun Nov 22 07:52:23 PM UTC 2026
+
+========== app ==========
+CPUs disponíveis:
+1
+Memória:
+               total        used        free      shared  buff/cache   available
+Mem:           512Mi        80Mi       238Mi        24Mi       218Mi       431Mi
+Swap:             0B          0B          0B
+Limite de memória (bytes):
+536870912
+CPUs permitidas:
+3
+
+========== db ==========
+CPUs disponíveis:
+1
+Memória:
+               total        used        free      shared  buff/cache   available
+Mem:           1.0Gi       115Mi       736Mi       172Ki       171Mi       908Mi
+Swap:             0B          0B          0B
+Limite de memória (bytes):
+1073741824
+CPUs permitidas:
+4
+
+========== dev-app ==========
+CPUs disponíveis:
+1
+Memória:
+               total        used        free      shared  buff/cache   available
+Mem:           512Mi        90Mi       230Mi        25Mi       216Mi       421Mi
+Swap:             0B          0B          0B
+Limite de memória (bytes):
+536870912
+CPUs permitidas:
+5
+
+========== dev-db ==========
+CPUs disponíveis:
+1
+Memória:
+               total        used        free      shared  buff/cache   available
+Mem:           1.0Gi       116Mi       735Mi       172Ki       171Mi       907Mi
+Swap:             0B          0B          0B
+Limite de memória (bytes):
+1073741824
+CPUs permitidas:
+0

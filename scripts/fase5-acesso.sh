@@ -8,7 +8,7 @@ checar_lxd
 
 # Confere o projeto exato, sem formar nomes divergentes.
 lx_global project show "$PROJETO" >/dev/null
-lxc config set core.https_address :8443
+lxc config set core.https_address 127.0.0.1:8443
 
 existe_cliente() {
     local nome="$1"
