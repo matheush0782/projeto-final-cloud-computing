@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# Mock do lxc para testar sem tocar em PROD/DEV
+MOCKDIR="$(mktemp -d)"
+cat > "$MOCKDIR/lxc" <<'MOCK'
+#!/usr/bin/env bash
+# Mock minimo: responde info, list, snapshot, export
+if [[ "$*" == *"info"* ]]; then echo "Status: Running"; exit 0; fi
+if [[ "$*" == *"snapshot list"* ]]; then echo "snap-20261122-180000,2026-11-22"; echo "snap-20261121-180000,2026-11-21"; exit 0; fi
+if [[ "$*" == *"list"* ]]; then echo "app,Running"; exit 0; fi
+if [[ "$*" == *"snapshot"* ]]; then echo "mock snapshot ok"; exit 0; fi
+if [[ "$*" == *"export"* ]]; then touch "${@: -1}"; exit 0; fi
+echo "mock lxc: $*"
+exit 0
+MOCK
+chmod +x "$MOCKDIR/lxc"
+export PATH="$MOCKDIR:$PATH"
+echo "[TEST] bash -n"
+for f in scripts/*.sh; do bash -n "$f" && echo "[OK] $f"; done
+echo "[TEST] dry-run snapshot"
+bash scripts/01-snapshot.sh --dry-run
+echo "[TEST] dry-run backup"
+bash scripts/02-backup.sh --dry-run
+echo "[TEST] dry-run limpeza"
+bash scripts/04-limpeza.sh --dry-run
+echo "[TEST] KEEP invalido deve falhar"
+if KEEP=abc bash scripts/04-limpeza.sh --dry-run 2>/dev/null; then echo "[FALHA] KEEP invalido nao foi rejeitado"; exit 1; else echo "[OK] KEEP invalido rejeitado"; fi
+echo "[TEST] Todos os testes mock passaram"
+rm -rf "$MOCKDIR"  
+
+name: Fase 6 - Validacao
+on:
+  push:
+    branches: [fase-6]
+  pull_request:
+    branches: [fase-6]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verifica estrutura
+        run: |
+          test -f scripts/01-snapshot.sh
+          test -f scripts/02-backup.sh
+          test -f scripts/03-restore.sh
+          test -f scripts/04-limpeza.sh
+          test -f docs/fase-6/README.md
+          test ! -f scripts/01-snapshot.sh.txt
+      - name: Sintaxe bash
+        run: bash -n scripts/01-snapshot.sh && bash -n scripts/02-backup.sh && bash -n scripts/03-restore.sh && bash -n scripts/04-limpeza.sh
+      - name: Sem duplicacao de shebang
+        run: |
+          for f in scripts/*.sh; do echo "$f: $(grep -c '^#!/usr/bin/env bash' "$f") shebang(s)"; test "$(grep -c '^#!/usr/bin/env bash' "$f")" -eq 1; done
+      - name: Testes com mock
+        run: bash tests/test_fase6.sh
+
+bash -n scripts/*.sh
+bash tests/test_fase6.sh
+./scripts/01-snapshot.sh --dry-run
+./scripts/02-backup.sh --dry-run
+./scripts/04-limpeza.sh --dry-run
+# CI: .github/workflows/fase-6.yml roda sintaxe + mock a cada push em fase-6
+
+
+---
+
+### Como subir sem duplicar de novo
+
+O erro de duplicação acontece quando você abre o arquivo velho e cola o novo dentro. Faz assim:
+
+1. **Apaga** o arquivo velho no Explorador (não abre ele)
+2. **Cria novo** arquivo vazio com o nome certo
+3. **Abre o novo** e cola 1 vez só
+4. Confere: `Ctrl + F` procura `#!/usr/bin/env bash` - tem que aparecer **1 vez só**
+5. Roda `bash -n scripts/01-snapshot.sh` - se der erro de sintaxe, não sobe
+
+No GitHub Desktop, branch `fase-6`, Commit: `Corrige Fase 6 - remove duplicacao, corrige --as com lxc move, get_state com if, checksum raiz, CI` e Push.
+
+Quer que eu te mande agora só o `03-restore.sh` separado pra você colar primeiro, já que ele foi o que mais mudou?

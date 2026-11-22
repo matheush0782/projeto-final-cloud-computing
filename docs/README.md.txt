@@ -22,7 +22,9 @@ Volumes:
 Snapshot de instância NÃO inclui volume customizado. Por isso sempre fazemos os dois.
 
 ## Estrutura de arquivos
-  
+
+
+
 ## Pré-requisitos
 
 - `lxc` instalado, acesso ao LXD, projeto `final-equipeN`, pool `pool-final`
@@ -35,7 +37,7 @@ Parâmetros: `--dry-run`, `--consistent`
 
 ```bash
 ./scripts/01-snapshot.sh --dry-run
-./scripts/01-snapshot.sh --consistent 
+./scripts/01-snapshot.sh --consistent
 
 lxc snapshot list --project final-equipeN app
 lxc storage volume snapshot list --project final-equipeN pool-final vol-db
