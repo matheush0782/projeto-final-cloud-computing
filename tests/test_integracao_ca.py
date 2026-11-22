@@ -200,6 +200,14 @@ class CAIntegrationTest(unittest.TestCase):
         self.assertNotIn("--insecure", curl_args)
         self.assertNotIn("-k", curl_args)
 
+    def test_https_template_uses_fixed_site_host_not_client_host_header(self):
+        template = (ROOT / "conf" / "nginx-servico-https.conf").read_text()
+        self.assertIn("https://__SITE_HOST__$request_uri", template)
+        self.assertIn("proxy_set_header Host __SITE_HOST__;", template)
+        self.assertIn("proxy_set_header X-Forwarded-Host __SITE_HOST__;", template)
+        self.assertNotIn("https://$host:", template)
+        self.assertNotIn("proxy_set_header Host $http_host;", template)
+
     def test_dev_tls_uses_8445_and_wordpress_https_url(self):
         self.seed_phase5("dev")
         self.run_tls("dev", IP_SITE="127.0.0.1")

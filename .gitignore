@@ -17,7 +17,9 @@ backup/
 /conf/tls/
 *.p12
 *.pfx
-*.pem
+*-key.pem
+*_key.pem
+*private*.pem
 
 # Dumps, backups e configurações privadas
 *.sql

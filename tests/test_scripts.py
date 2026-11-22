@@ -33,6 +33,11 @@ class ScriptsTest(unittest.TestCase):
     def seed(self):
         self.run_script('deploy.sh','--http-only')
         self.run_script('deploy.sh','--http-only',env={'ENV':'dev'})
+    def test_mariadb_binds_to_environment_db_address(self):
+        script = (ROOT / 'conf' / 'config-mariadb.sh').read_text()
+        self.assertIn('bind-address = $DB_IP', script)
+        self.assertNotIn('bind-address = 0.0.0.0', script)
+
     def test_prod_deploy(self):
         self.run_script('deploy.sh','--http-only')
         s=self.read()
@@ -52,7 +57,7 @@ class ScriptsTest(unittest.TestCase):
         self.assertEqual(s['instances'][PROJECT+'/dev-proxy']['devices']['porta-http']['listen'],'tcp:0.0.0.0:8082')
         self.assertNotIn('porta-https',s['instances'][PROJECT+'/dev-proxy']['devices'])
         maria=[x['args'] for x in s['log'] if '/root/config-mariadb.sh' in x['args'] and x['args'][0]=='exec'][-1]
-        self.assertIn('10.10.20.11',maria)
+        self.assertIn('10.10.20.12',maria); self.assertIn('10.10.20.11',maria)
         wp=[x['args'] for x in s['log'] if '/root/instala-wp.sh' in x['args'] and x['args'][0]=='exec'][-1]
         self.assertIn('10.10.20.12',wp); self.assertIn('http://127.0.0.1:8082',wp)
     def test_deploy_existing_refuses_deletion(self):
