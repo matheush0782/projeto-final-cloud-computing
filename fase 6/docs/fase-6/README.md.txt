@@ -5,7 +5,7 @@ Pool: `pool-final`
 
 ## Objetivo
 
-Permitir voltar no tempo se o WordPress, o banco ou um container quebrar, sem perder dados. Snapshot é rápido e fica dentro do LXD. Backup é exportado para `.tar.gz` fora do LXD e pode ser levado para outro lugar.
+Permitir voltar no tempo se o WordPress, o banco ou um container quebrar, sem perder dados. Snapshot é rápido e fica dentro do LXD. Backup é exportado para `.tar.gz` fora do LXD.
 
 ## Arquitetura real
 
@@ -13,16 +13,29 @@ Permitir voltar no tempo se o WordPress, o banco ou um container quebrar, sem pe
 - `app` (PROD 10.10.10.11 / `dev-app` 10.10.20.11) — **Apache + WordPress**
 - `db` (PROD 10.10.10.12 / `dev-db` 10.10.20.12) — **MariaDB**
 
-Volumes (onde estão os dados de verdade):
+Volumes:
 - `vol-db` → `db:/var/lib/mysql`
 - `vol-uploads` → `app:/var/www/html/wp-content/uploads`
 - `dev-vol-db` → `dev-db:/var/lib/mysql`
 - `dev-vol-uploads` → `dev-app:/var/www/html/wp-content/uploads`
 
-## Diferença: snapshot de instância vs volume
-
-- Snapshot de instância (`lxc snapshot`) salva o container, mas **NÃO** inclui volume customizado anexado.
-- Snapshot de volume (`lxc storage volume snapshot`) salva o disco de dados.
-- Por isso sempre fazemos os dois com o mesmo nome `snap-YYYYMMDD-HHMMSS`.
+Snapshot de instância NÃO inclui volume customizado. Por isso sempre fazemos os dois.
 
 ## Estrutura de arquivos
+  
+## Pré-requisitos
+
+- `lxc` instalado, acesso ao LXD, projeto `final-equipeN`, pool `pool-final`
+- `chmod +x scripts/*.sh`
+- Variáveis opcionais: `PROJECT`, `POOL`, `BACKUP_BASE`
+
+## 01-snapshot.sh
+
+Parâmetros: `--dry-run`, `--consistent`
+
+```bash
+./scripts/01-snapshot.sh --dry-run
+./scripts/01-snapshot.sh --consistent 
+
+lxc snapshot list --project final-equipeN app
+lxc storage volume snapshot list --project final-equipeN pool-final vol-db

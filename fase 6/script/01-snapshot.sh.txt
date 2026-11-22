@@ -8,9 +8,6 @@ SNAP="snap-${TS}"
 
 INSTANCES=("proxy" "app" "db" "dev-proxy" "dev-app" "dev-db")
 VOLUMES=("vol-db" "vol-uploads" "dev-vol-db" "dev-vol-uploads")
-
-# Quem consome volume: usado no modo consistente
-# vol-db -> db, vol-uploads -> app, dev-vol-db -> dev-db, dev-vol-uploads -> dev-app
 CONSUMERS=("app" "db" "dev-app" "dev-db")
 
 DRY_RUN=0; CONSISTENT=0
@@ -25,61 +22,22 @@ done
 
 command -v lxc >/dev/null || { echo "[ERRO] lxc nao encontrado" >&2; exit 1; }
 
-declare -A WAS_RUNNING=()
-
-is_running() {
-  local out
-  out="$(lxc info --project "$PROJECT" "$1" 2>/dev/null | grep -i "^Status:" || true)"
-  [[ "$out" == *"Running"* ]]
-}
-
-restore_state() {
-  # So religa quem estava ligado antes. Nunca liga quem ja estava desligado.
-  for inst in "${CONSUMERS[@]}"; do
-    if [[ "${WAS_RUNNING[$inst]:-0}" == "1" ]]; then
-      echo "[INFO] Restaurando estado: iniciando $inst"
-      lxc start --project "$PROJECT" "$inst" || echo "[ERRO] Falha ao religar $inst - verifique manualmente" >&2
-    fi
-  done
-}
-trap restore_state EXIT
-
-if [ "$DRY_RUN" -eq 1 ]; then
-  echo "[DRY-RUN] Projeto: $PROJECT Pool: $POOL Snapshot: $SNAP"
-  for i in "${INSTANCES[@]}"; do echo "[DRY-RUN] lxc snapshot --project \"$PROJECT\" $i $SNAP"; done
- #!/usr/bin/env bash
-set -Eeuo pipefail
-
-PROJECT="${PROJECT:-final-equipeN}"
-POOL="${POOL:-pool-final}"
-TS="$(date +%Y%m%d-%H%M%S)"
-SNAP="snap-${TS}"
-
-INSTANCES=("proxy" "app" "db" "dev-proxy" "dev-app" "dev-db")
-VOLUMES=("vol-db" "vol-uploads" "dev-vol-db" "dev-vol-uploads")
-CONSUMERS=("app" "db" "dev-app" "dev-db")
-
-DRY_RUN=0; CONSISTENT=0
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRY_RUN=1 ;;
-    --consistent) CONSISTENT=1 ;;
-    --help) echo "Uso: $0 [--dry-run] [--consistent]"; exit 0 ;;
-    *) echo "[ERRO] Arg desconhecido: $arg" >&2; exit 2 ;;
-  esac
-done
-
-command -v lxc >/dev/null || { echo "[ERRO] lxc nao encontrado" >&2; exit 1; }
-
-# Retorna: Running | Stopped | ERROR
-# NUNCA confunde erro com Stopped.
+# CORRECAO REVISAO 7.5: usa if, nao rc=$? (set -e mataria antes)
+# Retorna Running / Stopped / ERROR
 get_state() {
-  local out rc
-  out="$(lxc info --project "$PROJECT" "$1" 2>&1)"; rc=$?
-  if [ $rc -ne 0 ]; then echo "ERROR"; echo "[ERRO] Falha ao consultar $1: $out" >&2; return 1; fi
+  local out
+  if out="$(lxc info --project "$PROJECT" "$1" 2>&1)"; then
+    :
+  else
+    echo "[ERRO] Falha ao consultar $1: $out" >&2
+    echo "ERROR"
+    return 1
+  fi
   if echo "$out" | grep -qi "^Status:.*Running"; then echo "Running"; return 0; fi
   if echo "$out" | grep -qi "^Status:.*Stopped"; then echo "Stopped"; return 0; fi
-  echo "ERROR"; echo "[ERRO] Estado desconhecido em $1: $out" >&2; return 1
+  echo "[ERRO] Estado desconhecido em $1" >&2
+  echo "ERROR"
+  return 1
 }
 
 declare -A WAS_RUNNING=()
@@ -108,7 +66,7 @@ if [ "$CONSISTENT" -eq 1 ]; then
   done
   for inst in "${CONSUMERS[@]}"; do
     if [[ "${WAS_RUNNING[$inst]}" == "Running" ]]; then
-      if ! lxc stop --project "$PROJECT" "$inst"; then echo "[ERRO] Falha ao parar $inst. Abortando, snapshot NAO concluido." >&2; exit 1; fi
+      if ! lxc stop --project "$PROJECT" "$inst"; then echo "[ERRO] Falha ao parar $inst. Abortando." >&2; exit 1; fi
     fi
   done
 fi

@@ -84,16 +84,59 @@ clean_one() {
     FAILED=1; rm -f "$tmp" "$errf"; return 1
   fi
 
-  # Le arquivo linha a linha, sem mapfile + process substitution
+  #!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT="${PROJECT:-final-equipeN}"
+POOL="${POOL:-pool-final}"
+KEEP="${KEEP:-7}"
+DRY_RUN=1; YES=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    --execute) DRY_RUN=0 ;;
+    --yes) YES=1 ;;
+    --help) echo "Uso: $0 [--dry-run] [--execute --yes]"; echo "KEEP: KEEP=10 $0 --dry-run"; exit 0 ;;
+    *) echo "[ERRO] Arg desconhecido: $arg" >&2; exit 2 ;;
+  esac
+done
+
+if ! [[ "$KEEP" =~ ^[0-9]+$ ]]; then echo "[ERRO] KEEP deve ser inteiro >=0, recebido: $KEEP" >&2; exit 2; fi
+command -v lxc >/dev/null || { echo "[ERRO] lxc nao encontrado" >&2; exit 1; }
+
+INSTANCES=("proxy" "app" "db" "dev-proxy" "dev-app" "dev-db")
+VOLUMES=("vol-db" "vol-uploads" "dev-vol-db" "dev-vol-uploads")
+FAILED=0
+
+list_snaps_to_file() {
+  local kind="$1" name="$2" outfile="$3" errfile="$4"
+  if [ "$kind" = "instance" ]; then
+    if ! lxc snapshot list --project "$PROJECT" "$name" --format csv > "$outfile" 2> "$errfile"; then
+      echo "[ERRO] Falha ao listar snapshots de $name:" >&2; cat "$errfile" >&2; return 1
+    fi
+  else
+    if ! lxc storage volume snapshot list --project "$PROJECT" "$POOL" "$name" --format csv > "$outfile" 2> "$errfile"; then
+      echo "[ERRO] Falha ao listar snapshots do volume $name:" >&2; cat "$errfile" >&2; return 1
+    fi
+  fi
+  return 0
+}
+
+clean_one() {
+  local kind="$1" name="$2"
+  local tmp errf
+  tmp="$(mktemp)"; errf="$(mktemp)"
+  echo "[INFO] $kind $name - mantendo $KEEP mais recentes"
+  if ! list_snaps_to_file "$kind" "$name" "$tmp" "$errf"; then
+    echo "[ERRO] Abortando limpeza de $name - consulta falhou, nao vou assumir lista vazia" >&2
+    FAILED=1; rm -f "$tmp" "$errf"; return 1
+  fi
   local snaps=() line
   while IFS= read -r line || [ -n "$line" ]; do
     [ -z "$line" ] && continue
-    # csv: primeira coluna e o nome
     snaps+=("$(echo "$line" | cut -d, -f1)")
   done < "$tmp"
   rm -f "$tmp" "$errf"
-
-  # Ordena do mais novo para o mais velho (nome tem data)
   IFS=$'\n' snaps=($(printf "%s\n" "${snaps[@]}" | sort -r)); unset IFS
   local total=${#snaps[@]}
   echo "[INFO]  $name tem $total snapshots"
@@ -118,3 +161,43 @@ for v in "${VOLUMES[@]}"; do clean_one "volume" "$v" || true; done
 if [ "$DRY_RUN" -eq 1 ]; then echo "[DRY-RUN] Nenhum snapshot apagado. Para apagar: $0 --execute --yes"; fi
 [ "$FAILED" -eq 0 ] || { echo "[ERRO] Limpeza com falhas" >&2; exit 1; }
 echo "[OK] Limpeza concluida"
+
+./scripts/04-limpeza.sh --dry-run
+KEEP=10 ./scripts/04-limpeza.sh --dry-run
+./scripts/04-limpeza.sh --execute --yes
+
+# 1. Restaurar volumes primeiro
+./scripts/03-restore.sh --mode snapshot --type volume --resource vol-db --snapshot snap-20261122-180000
+./scripts/03-restore.sh --mode snapshot --type volume --resource vol-uploads --snapshot snap-20261122-180000
+# 2. Restaurar instancias
+./scripts/03-restore.sh --mode snapshot --type instance --resource db --snapshot snap-20261122-180000
+./scripts/03-restore.sh --mode snapshot --type instance --resource app --snapshot snap-20261122-180000
+./scripts/03-restore.sh --mode snapshot --type instance --resource proxy --snapshot snap-20261122-180000
+# 3. Verificar
+lxc exec --project final-equipeN db -- systemctl status mariadb
+lxc exec --project final-equipeN proxy -- systemctl status nginx
+lxc exec --project final-equipeN app -- systemctl status apache2
+
+bash -n scripts/*.sh
+bash tests/test_fase6.sh
+./scripts/01-snapshot.sh --dry-run
+./scripts/02-backup.sh --dry-run
+./scripts/04-limpeza.sh --dry-run
+# CI: .github/workflows/fase-6.yml roda sintaxe + mock a cada push em fase-6
+
+
+---
+
+### Como subir sem duplicar de novo
+
+O erro de duplicação acontece quando você abre o arquivo velho e cola o novo dentro. Faz assim:
+
+1. **Apaga** o arquivo velho no Explorador (não abre ele)
+2. **Cria novo** arquivo vazio com o nome certo
+3. **Abre o novo** e cola 1 vez só
+4. Confere: `Ctrl + F` procura `#!/usr/bin/env bash` - tem que aparecer **1 vez só**
+5. Roda `bash -n scripts/01-snapshot.sh` - se der erro de sintaxe, não sobe
+
+No GitHub Desktop, branch `fase-6`, Commit: `Corrige Fase 6 - remove duplicacao, corrige --as com lxc move, get_state com if, checksum raiz, CI` e Push.
+
+Quer que eu te mande agora só o `03-restore.sh` separado pra você colar primeiro, já que ele foi o que mais mudou?

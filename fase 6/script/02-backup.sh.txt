@@ -20,9 +20,14 @@ command -v lxc >/dev/null || { echo "[ERRO] lxc nao encontrado" >&2; exit 1; }
 command -v sha256sum >/dev/null || { echo "[ERRO] sha256sum nao encontrado" >&2; exit 1; }
 
 get_state() {
-  local out rc
-  out="$(lxc info --project "$PROJECT" "$1" 2>&1)"; rc=$?
-  if [ $rc -ne 0 ]; then echo "ERROR"; echo "[ERRO] Falha ao consultar $1: $out" >&2; return 1; fi
+  local out
+  if out="$(lxc info --project "$PROJECT" "$1" 2>&1)"; then
+    :
+  else
+    echo "[ERRO] Falha ao consultar $1: $out" >&2
+    echo "ERROR"
+    return 1
+  fi
   if echo "$out" | grep -qi "^Status:.*Running"; then echo "Running"; return 0; fi
   if echo "$out" | grep -qi "^Status:.*Stopped"; then echo "Stopped"; return 0; fi
   echo "ERROR"; return 1
@@ -41,21 +46,21 @@ trap restore_state EXIT
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "[DRY-RUN] Backup seria criado em $DEST"
-  echo "[DRY-RUN] Pararia consumidores, exportaria instancias com --instance-only + volumes separados, geraria MANIFEST + sha256"
+  echo "[DRY-RUN] Pararia consumidores, exportaria instancias com --instance-only + volumes separados"
   trap - EXIT; exit 0
 fi
 
 if [ -e "$DEST" ]; then echo "[ERRO] Destino $DEST ja existe. Abortando." >&2; exit 1; fi
 mkdir -p "$DEST/prod/instancias" "$DEST/prod/volumes" "$DEST/dev/instancias" "$DEST/dev/volumes" || { echo "[ERRO] Falha ao criar $DEST" >&2; exit 1; }
 
-echo "[INFO] Registrando estado e parando consumidores para export consistente"
+echo "[INFO] Registrando estado e parando consumidores"
 for inst in "${CONSUMERS[@]}"; do
   st="$(get_state "$inst")" || { echo "[ERRO] Abortando, nao foi possivel determinar estado de $inst" >&2; exit 1; }
   WAS_RUNNING["$inst"]="$st"
 done
 for inst in "${CONSUMERS[@]}"; do
   if [[ "${WAS_RUNNING[$inst]}" == "Running" ]]; then
-    lxc stop --project "$PROJECT" "$inst" || { echo "[ERRO] Falha ao parar $inst. Abortando backup." >&2; exit 1; }
+    lxc stop --project "$PROJECT" "$inst" || { echo "[ERRO] Falha ao parar $inst. Abortando." >&2; exit 1; }
   fi
 done
 
@@ -66,7 +71,6 @@ FAILED=0
 export_inst() {
   local env="$1" inst="$2" out="$DEST/$env/instancias/${env}-${inst}-${TS}.tar.gz"
   echo "[INFO] Exportando instancia $inst com --instance-only"
-  # CORRECAO: --instance-only, volume exportado separadamente abaixo
   if lxc export --project "$PROJECT" --instance-only "$inst" "$out" && [ -s "$out" ]; then
     echo "[OK] instancia $inst -> $out" >> "$MANIFEST"; echo "[OK] $inst"
   else echo "[ERRO] Falha export $inst" >&2; echo "[FALHA] instancia $inst" >> "$MANIFEST"; FAILED=1; fi
@@ -90,3 +94,14 @@ if [ "$FAILED" -eq 0 ]; then
 fi
 [ "$FAILED" -eq 0 ] || { echo "[ERRO] Backup com FALHAS. Veja $MANIFEST" >&2; exit 1; }
 echo "[OK] Backup concluido em $DEST"
+
+./scripts/02-backup.sh --dry-run
+./scripts/02-backup.sh
+
+/opt/backups/fase-6/<data>/
+├── prod/instancias/*.tar.gz
+├── prod/volumes/*.tar.gz
+├── dev/instancias/*.tar.gz
+├── dev/volumes/*.tar.gz
+├── MANIFEST.txt
+└── sha256sums.txt
