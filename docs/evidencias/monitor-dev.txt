@@ -1,0 +1,25 @@
+[19:45:28] Amostra: projeto=final-equipeN ambiente=dev modo=allowlist
+NAME                 STATE      IPV4                     MEMORY         DISK    CPU_SECONDS
+-------------------------------------------------------------------------------------------
+dev-app              RUNNING    10.10.20.11 (eth0)    276.28MiB            -            43s
+dev-db               RUNNING    10.10.20.12 (eth0)    286.68MiB            -            40s
+dev-proxy            RUNNING    10.10.20.10 (eth0)    462.62MiB            -            60s
+Guest df (dev-app):
+PATH            SIZE  USED AVAIL USE%
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda2        40G   15G   23G  39% /
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda2        40G   15G   23G  39% /var/www/html/wp-content/uploads
+Métricas Prometheus filtradas (project=final-equipeN env=dev):
+lxd_cpu_seconds_total{cpu="0",mode="system",name="dev-app",project="final-equipeN",type="container"} 26.620264
+lxd_cpu_seconds_total{cpu="0",mode="user",name="dev-app",project="final-equipeN",type="container"} 16.948351
+lxd_cpu_seconds_total{cpu="0",mode="system",name="dev-db",project="final-equipeN",type="container"} 23.983738
+lxd_cpu_seconds_total{cpu="0",mode="user",name="dev-db",project="final-equipeN",type="container"} 16.274866
+lxd_cpu_seconds_total{cpu="0",mode="system",name="dev-proxy",project="final-equipeN",type="container"} 26.88447
+lxd_cpu_seconds_total{cpu="0",mode="user",name="dev-proxy",project="final-equipeN",type="container"} 33.479447
+lxd_filesystem_avail_bytes{device="dev-vol-uploads",fstype="ext4",mountpoint="/var/www/html/wp-content/uploads",name="dev-app",project="final-equipeN",type="container"} 2.4423288832e+10
+lxd_filesystem_avail_bytes{device="",fstype="ext4",mountpoint="/",name="dev-app",project="final-equipeN",type="container"} 2.4423288832e+10
+lxd_filesystem_avail_bytes{device="",fstype="ext4",mountpoint="/",name="dev-db",project="final-equipeN",type="container"} 2.4423288832e+10
+lxd_filesystem_avail_bytes{device="dev-vol-db",fstype="ext4",mountpoint="/var/lib/mysql",name="dev-db",project="final-equipeN",type="container"} 2.4423288832e+10
+lxd_filesystem_avail_bytes{device="",fstype="ext4",mountpoint="/",name="dev-proxy",project="final-equipeN",type="container"} 2.4423288832e+10
+lxd_memory_MemAvailable_bytes{name="dev-app",project="final-equipeN",type="container"} 4.59096064e+08

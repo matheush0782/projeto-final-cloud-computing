@@ -1,0 +1,25 @@
+[19:45:11] Amostra: projeto=final-equipeN ambiente=prod modo=allowlist
+NAME                 STATE      IPV4                     MEMORY         DISK    CPU_SECONDS
+-------------------------------------------------------------------------------------------
+app                  RUNNING    10.10.10.11 (eth0)    272.98MiB            -            41s
+db                   RUNNING    10.10.10.12 (eth0)    286.04MiB            -            44s
+proxy                RUNNING    10.10.10.10 (eth0)    173.75MiB            -            36s
+Guest df (app):
+PATH            SIZE  USED AVAIL USE%
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda2        40G   15G   23G  39% /
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda2        40G   15G   23G  39% /var/www/html/wp-content/uploads
+Métricas Prometheus filtradas (project=final-equipeN env=prod):
+lxd_cpu_seconds_total{cpu="0",mode="system",name="proxy",project="final-equipeN",type="container"} 25.691699
+lxd_cpu_seconds_total{cpu="0",mode="user",name="proxy",project="final-equipeN",type="container"} 10.631755
+lxd_cpu_seconds_total{cpu="0",mode="system",name="db",project="final-equipeN",type="container"} 28.708467
+lxd_cpu_seconds_total{cpu="0",mode="user",name="db",project="final-equipeN",type="container"} 15.91242
+lxd_cpu_seconds_total{cpu="0",mode="system",name="app",project="final-equipeN",type="container"} 24.60101
+lxd_cpu_seconds_total{cpu="0",mode="user",name="app",project="final-equipeN",type="container"} 16.969795
+lxd_filesystem_avail_bytes{device="",fstype="ext4",mountpoint="/",name="proxy",project="final-equipeN",type="container"} 2.4423292928e+10
+lxd_filesystem_avail_bytes{device="vol-db",fstype="ext4",mountpoint="/var/lib/mysql",name="db",project="final-equipeN",type="container"} 2.4423292928e+10
+lxd_filesystem_avail_bytes{device="",fstype="ext4",mountpoint="/",name="db",project="final-equipeN",type="container"} 2.4423292928e+10
+lxd_filesystem_avail_bytes{device="",fstype="ext4",mountpoint="/",name="app",project="final-equipeN",type="container"} 2.4423292928e+10
+lxd_filesystem_avail_bytes{device="vol-uploads",fstype="ext4",mountpoint="/var/www/html/wp-content/uploads",name="app",project="final-equipeN",type="container"} 2.4423292928e+10
+lxd_memory_MemAvailable_bytes{name="proxy",project="final-equipeN",type="container"} 4.8955392e+08

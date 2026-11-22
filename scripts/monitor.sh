@@ -241,7 +241,7 @@ show_metrics() {
 
   # O parâmetro project é explícito mesmo com --project no wrapper lx(). A
   # indisponibilidade do endpoint é informativa, não invalida a listagem.
-  if ! raw="$(lx query "/1.0/metrics?project=${PROJETO}" 2>&1)"; then
+  if ! raw="$(lxc query "/1.0/metrics?project=${PROJETO}" 2>&1)"; then
     log "Aviso: endpoint /1.0/metrics indisponível para '$PROJETO'; seguindo sem métricas."
     return 0
   fi
