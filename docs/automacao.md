@@ -6,6 +6,8 @@ Esta revisão parte da `dev` no commit `8145908`, que já recebeu a Fase 5 pela 
 
 O certificado do WordPress agora é assinado pela **CA própria da Fase 5**. O deploy não cria mais um certificado de serviço autoassinado isolado para depois substituí-lo. A própria CA é uma raiz autoassinada, como esperado nesse laboratório; o certificado do serviço é assinado por ela.
 
+No template HTTPS, o redirecionamento e os cabeçalhos enviados ao WordPress usam o host fixo derivado de `IP_SITE` e da porta HTTPS do ambiente. O valor recebido no cabeçalho `Host` pelo cliente não é reutilizado para formar o redirecionamento nem encaminhado ao WordPress.
+
 `scripts/fase5-tls.sh` é o único responsável por gerar/reutilizar os materiais TLS, instalar os certificados no Nginx, publicar HTTPS e atualizar `WP_HOME`/`WP_SITEURL` com `conf/atualiza-url-wp.php`. Esse atualizador aceita a formatação com espaços do instalador WordPress.
 
 Os materiais locais ficam em `conf/tls/prod/` ou `conf/tls/dev/`, ignorados pelo Git. Dentro dos proxies, os caminhos são `/etc/nginx/ssl/servico.crt` e `/etc/nginx/ssl/servico.key`. O template inicial `conf/nginx-servico.conf` atende somente HTTP; o template `conf/nginx-servico-https.conf` da Fase 5 ativa TLS e redireciona HTTP para HTTPS.
@@ -14,9 +16,13 @@ A Fase 5 verifica/atualiza `porta-https` em vez de adicioná-lo duas vezes. O de
 
 ## Portas e ambientes
 
+O configurador MariaDB recebe o IP do próprio container (`DB_IP`) e o IP da aplicação (`APP_IP`). O serviço escuta somente no IP privado do container DB, enquanto o usuário SQL continua restrito ao IP do container APP.
+
 PROD usa `proxy`, `app` e `db` em `10.10.10.10`, `.11` e `.12`, com HTTP **8081** e HTTPS WordPress **8444**. DEV usa `dev-proxy`, `dev-app` e `dev-db` em `10.10.20.10`, `.11` e `.12`, com HTTP **8082** e HTTPS WordPress **8445**.
 
-**8443 é a API/UI do LXD, não o WordPress.** O deploy, o monitor e a coleta de evidências não configuram essa porta nem criam clientes administrativos. A abertura do painel em `https://127.0.0.1:8443` não comprova HTTPS do site.
+**8443 é a API/UI do LXD, não o WordPress.**
+
+O script `scripts/fase5-acesso.sh` configura a API do LXD para escutar somente em `127.0.0.1:8443`. Os comandos `lxc` executados dentro da VM continuam usando o socket local; para uma conexão administrativa HTTPS a partir de outra máquina, utilize um túnel SSH em vez de expor a API em todas as interfaces. O deploy, o monitor e a coleta de evidências não configuram essa porta nem criam clientes administrativos. A abertura do painel em `https://127.0.0.1:8443` não comprova HTTPS do site.
 
 Depois de ativar TLS, 8081/8082 redirecionam para 8444/8445: não espere que o site continue com URL canônica HTTP. Para manter apenas HTTP enquanto a equipe organiza o TLS, use `--http-only`. Isso não ativa a Fase 5 nem publica 8444/8445 nesse deploy.
 
@@ -78,7 +84,7 @@ Na correção de segurança da PR #4, o deploy retira `DB_PASS`, `DB_PASS_PROD` 
 Os três arquivos `scripts/deploy.sh`, `conf/config-mariadb.sh` e `conf/instala-wp.sh` precisam ser atualizados juntos. As interfaces internas agora são:
 
 ```text
-config-mariadb.sh --password-stdin APP_IP BASE USUARIO
+config-mariadb.sh --password-stdin DB_IP APP_IP BASE USUARIO
 instala-wp.sh --password-stdin DB_HOST URL [DB_NAME=wordpress] [DB_USER=wpuser]
 ```
 

@@ -1,0 +1,14 @@
+name: acl-dev
+description: ACL para isolamento da rede net-dev contra net-prod
+rules:
+  - action: drop
+    direction: ingress
+    source: 10.10.10.0/24
+    state: enabled
+  - action: drop
+    direction: egress
+    destination: 10.10.10.0/24
+    state: enabled
+config: {}
+used_by:
+  - /1.0/networks/net-dev

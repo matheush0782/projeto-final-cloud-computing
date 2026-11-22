@@ -17,3 +17,12 @@ backup/
 /conf/tls/
 *.p12
 *.pfx
+*-key.pem
+*_key.pem
+*private*.pem
+
+# Dumps, backups e configurações privadas
+*.sql
+*.dump
+*.bak
+wp-config.php
