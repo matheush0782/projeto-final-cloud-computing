@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT="${PROJECT:-final-equipeN}"
+POOL="${POOL:-pool-final}"
+TS="$(date +%Y%m%d-%H%M%S)"
+SNAP="snap-${TS}"
+
+INSTANCES=("proxy" "app" "db" "dev-proxy" "dev-app" "dev-db")
+VOLUMES=("vol-db" "vol-uploads" "dev-vol-db" "dev-vol-uploads")
+
+# Quem consome volume: usado no modo consistente
+# vol-db -> db, vol-uploads -> app, dev-vol-db -> dev-db, dev-vol-uploads -> dev-app
+CONSUMERS=("app" "db" "dev-app" "dev-db")
+
+DRY_RUN=0; CONSISTENT=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    --consistent) CONSISTENT=1 ;;
+    --help) echo "Uso: $0 [--dry-run] [--consistent]"; exit 0 ;;
+    *) echo "[ERRO] Arg desconhecido: $arg" >&2; exit 2 ;;
+  esac
+done
+
+command -v lxc >/dev/null || { echo "[ERRO] lxc nao encontrado" >&2; exit 1; }
+
+declare -A WAS_RUNNING=()
+
+is_running() {
+  local out
+  out="$(lxc info --project "$PROJECT" "$1" 2>/dev/null | grep -i "^Status:" || true)"
+  [[ "$out" == *"Running"* ]]
+}
+
+restore_state() {
+  # So religa quem estava ligado antes. Nunca liga quem ja estava desligado.
+  for inst in "${CONSUMERS[@]}"; do
+    if [[ "${WAS_RUNNING[$inst]:-0}" == "1" ]]; then
+      echo "[INFO] Restaurando estado: iniciando $inst"
+      lxc start --project "$PROJECT" "$inst" || echo "[ERRO] Falha ao religar $inst - verifique manualmente" >&2
+    fi
+  done
+}
+trap restore_state EXIT
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "[DRY-RUN] Projeto: $PROJECT Pool: $POOL Snapshot: $SNAP"
+  for i in "${INSTANCES[@]}"; do echo "[DRY-RUN] lxc snapshot --project \"$PROJECT\" $i $SNAP"; done
+  for v in "${VOLUMES[@]}"; do echo "[DRY-RUN] lxc storage volume snapshot --project \"$PROJECT\" $POOL $v $SNAP"; done
+  trap - EXIT
+  exit 0
+fi
+
+if [ "$CONSISTENT" -eq 1 ]; then
+  echo "[INFO] Modo consistente: registrando estado original"
+  for inst in "${CONSUMERS[@]}"; do
+    if is_running "$inst"; then WAS_RUNNING["$inst"]=1; echo "[INFO] $inst estava Running"; else WAS_RUNNING["$inst"]=0; echo "[INFO] $inst estava Stopped (nao sera religado)"; fi
+  done
+  echo "[INFO] Parando consumidores para snapshot consistente"
+  for inst in "${CONSUMERS[@]}"; do
+    if [[ "${WAS_RUNNING[$inst]}" == "1" ]]; then
+      # SE FALHAR AQUI, PARA TUDO. Nao continua.
+      if ! lxc stop --project "$PROJECT" "$inst"; then
+        echo "[ERRO] Falha ao parar $inst. Abortando, snapshot NAO foi concluido." >&2
+        exit 1
+      fi
+    fi
+  done
+fi
+
+FAILED=0
+for inst in "${INSTANCES[@]}"; do
+  echo "[INFO] Snapshot instancia $inst -> $SNAP"
+  if lxc snapshot --project "$PROJECT" "$inst" "$SNAP"; then echo "[OK] $inst"; else echo "[ERRO] Falha snapshot $inst" >&2; FAILED=1; fi
+done
+
+for vol in "${VOLUMES[@]}"; do
+  echo "[INFO] Snapshot volume $vol -> $SNAP"
+  if lxc storage volume snapshot --project "$PROJECT" "$POOL" "$vol" "$SNAP"; then echo "[OK] $vol"; else echo "[ERRO] Falha snapshot volume $vol" >&2; FAILED=1; fi
+done
+
+if [ "$FAILED" -ne 0 ]; then echo "[ERRO] Snapshot concluido com FALHAS. Ponto $SNAP incompleto." >&2; exit 1; fi
+echo "[OK] Snapshots concluidos. Ponto: $SNAP"

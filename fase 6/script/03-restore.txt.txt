@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT="${PROJECT:-final-equipeN}"
+POOL="${POOL:-pool-final}"
+
+MODE="snapshot" # snapshot ou import
+TYPE=""; RESOURCE=""; SNAP=""; FILE=""; AS_NAME=""
+DRY_RUN=0; YES=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --mode) MODE="$2"; shift 2 ;;
+    --type) TYPE="$2"; shift 2 ;;
+    --resource) RESOURCE="$2"; shift 2 ;;
+    --snapshot) SNAP="$2"; shift 2 ;;
+    --file) FILE="$2"; shift 2 ;;
+    --as) AS_NAME="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --yes) YES=1; shift ;;
+    --help)
+      echo "Snapshot: $0 --mode snapshot --type instance|volume --resource NOME --snapshot snap-XXX [--dry-run] [--yes]"
+      echo "Import:   $0 --mode import --type instance|volume --file backup.tar.gz --as NOVO-NOME [--dry-run] [--yes]"
+      echo "Ex import instancia: $0 --mode import --type instance --file prod-db-xxx.tar.gz --as db-restaurado"
+      echo "Ex import volume:    $0 --mode import --type volume --file prod-vol-db-xxx.tar.gz --as vol-db-restaurado"
+      exit 0 ;;
+    *) echo "[ERRO] Arg desconhecido: $1" >&2; exit 2 ;;
+  esac
+done
+
+command -v lxc >/dev/null || { echo "[ERRO] lxc nao encontrado" >&2; exit 1; }
+
+# Mapa obrigatorio volume -> instancia dona. Sem isso, RECUSA.
+get_owner() {
+  case "$1" in
+    vol-db) echo "db" ;;
+    vol-uploads) echo "app" ;;
+    dev-vol-db) echo "dev-db" ;;
+    dev-vol-uploads) echo "dev-app" ;;
+    *) echo "" ;;
+  esac
+}
+
+declare -A WAS_RUNNING=()
+is_running() { lxc info --project "$PROJECT" "$1" 2>/dev/null | grep -qi "^Status:.*Running"; }
+restore_state() {
+  for inst in "${!WAS_RUNNING[@]}"; do
+    if [[ "${WAS_RUNNING[$inst]}" == "1" ]]; then
+      echo "[INFO] Religando $inst apos restore (estava ligado antes)"
+      lxc start --project "$PROJECT" "$inst" || echo "[ERRO] Falha ao religar $inst" >&2
+    fi
+  done
+}
+trap restore_state EXIT
+
+# ---------- MODO IMPORT COM NOME DIFERENTE ----------
+if [ "$MODE" = "import" ]; then
+  [ -n "$FILE" ] || { echo "[ERRO] Informe --file" >&2; exit 2; }
+  [ -n "$AS_NAME" ] || { echo "[ERRO] Informe --as NOVO-NOME" >&2; exit 2; }
+  [ -f "$FILE" ] || { echo "[ERRO] Arquivo $FILE nao existe" >&2; exit 1; }
+  [ -s "$FILE" ] || { echo "[ERRO] Arquivo $FILE vazio" >&2; exit 1; }
+  # Valida checksum se houver sha256sums.txt na mesma pasta
+  DIR="$(dirname "$FILE")"
+  if [ -f "$DIR/sha256sums.txt" ]; then
+    echo "[INFO] Validando checksum de $FILE"
+    (cd "$DIR" && sha256sum -c sha256sums.txt --ignore-missing 2>/dev/null | grep -q "$(basename "$FILE"): OK") || { echo "[ERRO] Checksum falhou ou nao encontrado para $FILE" >&2; exit 1; }
+    echo "[OK] Checksum OK"
+  else echo "[AVISO] Sem sha256sums.txt, pulando validacao de checksum"; fi
+
+  echo "[AVISO] Vai importar $TYPE $FILE como $AS_NAME no projeto $PROJECT"
+  if [ "$YES" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then read -r -p "Digite CONFIRMAR: " ans; [ "$ans" = "CONFIRMAR" ] || { echo "Cancelado"; trap - EXIT; exit 0; }; fi
+  if [ "$DRY_RUN" -eq 1 ]; then echo "[DRY-RUN] Importaria $TYPE $FILE como $AS_NAME"; trap - EXIT; exit 0; fi
+
+  if [ "$TYPE" = "instance" ]; then
+    # lxc import cria com nome original do backup; depois renomeia se preciso
+    # Para garantir nome diferente, importamos e renomeamos via lxc move
+    ORIG="$(basename "$FILE" .tar.gz)"
+    lxc import --project "$PROJECT" "$FILE" || { echo "[ERRO] Falha no import" >&2; exit 1; }
+    # Tenta descobrir nome importado: se for diferente de AS_NAME, move
+    if lxc info --project "$PROJECT" "$AS_NAME" >/dev/null 2>&1; then echo "[OK] Importado como $AS_NAME"; else
+      # Tenta mover do nome original inferido - lista e usa o mais recente se necessario
+      echo "[INFO] Renomeando importado para $AS_NAME"
+      # Se o nome original nao for encontrado, lista para o usuario
+      lxc list --project "$PROJECT" --format csv | cut -d, -f1 | head -20
+      echo "[ERRO] Importou mas nao achei nome $AS_NAME. Verifique com lxc list e use: lxc move --project $PROJECT <nome-antigo> $AS_NAME" >&2; exit 1
+    fi
+    # Prova que dados estao acessiveis: lista e info
+    lxc info --project "$PROJECT" "$AS_NAME" | head -20
+  else
+    # Volume: lxc storage volume import <pool> <arquivo> <novo-nome>
+    if lxc storage volume import --project "$PROJECT" "$POOL" "$FILE" "$AS_NAME"; then
+      echo "[OK] Volume importado como $AS_NAME"
+      lxc storage volume list --project "$PROJECT" "$POOL" | grep "$AS_NAME" || true
+      lxc storage volume info --project "$PROJECT" "$POOL" "$AS_NAME" | head -20
+    else echo "[ERRO] Falha import volume" >&2; exit 1; fi
+  fi
+  echo "[OK] Import concluido: $TYPE -> $AS_NAME"
+  trap - EXIT; exit 0
+fi
+
+# ---------- MODO SNAPSHOT ----------
+[ -n "$TYPE" ] || { echo "[ERRO] Informe --type instance|volume" >&2; exit 2; }
+[ -n "$RESOURCE" ] || { echo "[ERRO] Informe --resource" >&2; exit 2; }
+[ -n "$SNAP" ] || { echo "[ERRO] Informe --snapshot" >&2; exit 2; }
+
+if [ "$TYPE" = "instance" ]; then
+  lxc info --project "$PROJECT" "$RESOURCE" >/dev/null 2>&1 || { echo "[ERRO] Instancia $RESOURCE nao existe" >&2; exit 1; }
+  lxc snapshot list --project "$PROJECT" "$RESOURCE" --format csv | grep -qx "$SNAP" || { echo "[ERRO] Snapshot $SNAP nao existe em $RESOURCE" >&2; exit 1; }
+  OWNER="$RESOURCE"
+else
+  OWNER="$(get_owner "$RESOURCE")"
+  [ -n "$OWNER" ] || { echo "[ERRO] Volume $RESOURCE desconhecido. Nao sei qual instancia usa ele. Abortando por seguranca." >&2; exit 1; }
+  lxc storage volume list --project "$PROJECT" "$POOL" --format csv | grep -q "^${RESOURCE}," || { echo "[ERRO] Volume $RESOURCE nao existe no pool $POOL projeto $PROJECT" >&2; exit 1; }
+  lxc storage volume snapshot list --project "$PROJECT" "$POOL" "$RESOURCE" --format csv | grep -qx "$SNAP" || { echo "[ERRO] Snapshot $SNAP nao existe no volume $RESOURCE" >&2; exit 1; }
+fi
+
+echo "[AVISO] Vai SUBSTITUIR dados atuais de $TYPE $RESOURCE por $SNAP"
+if [ "$YES" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then read -r -p "Digite CONFIRMAR: " ans; [ "$ans" = "CONFIRMAR" ] || { echo "Cancelado"; trap - EXIT; exit 0; }; fi
+if [ "$DRY_RUN" -eq 1 ]; then echo "[DRY-RUN] Restauraria $TYPE $RESOURCE -> $SNAP (parando $OWNER se preciso)"; trap - EXIT; exit 0; fi
+
+# Registra estado original do dono
+if is_running "$OWNER"; then WAS_RUNNING["$OWNER"]=1; else WAS_RUNNING["$OWNER"]=0; fi
+if [[ "${WAS_RUNNING[$OWNER]}" == "1" ]]; then
+  lxc stop --project "$PROJECT" "$OWNER" || { echo "[ERRO] Falha ao parar $OWNER" >&2; exit 1; }
+fi
+
+if [ "$TYPE" = "instance" ]; then
+  if ! lxc restore --project "$PROJECT" "$RESOURCE" "$SNAP"; then echo "[ERRO] Falha no restore de $RESOURCE. Tentando religar se estava ligado." >&2; exit 1; fi
+else
+  if ! lxc storage volume restore --project "$PROJECT" "$POOL" "$RESOURCE" "$SNAP"; then echo "[ERRO] Falha restore volume $RESOURCE" >&2; exit 1; fi
+fi
+
+echo "[OK] Restore concluido: $TYPE $RESOURCE -> $SNAP"
+# trap vai religar so quem estava ligado
+trap - EXIT
+restore_state
+
+./scripts/03-restore.sh --mode snapshot --type instance --resource app --snapshot snap-20261122-180000 --dry-run
+./scripts/03-restore.sh --mode snapshot --type volume --resource vol-db --snapshot snap-20261122-180000
+
+# Instância como db-restaurado
+./scripts/03-restore.sh --mode import --type instance --file /opt/backups/fase-6/xxx/prod/instancias/prod-db-xxx.tar.gz --as db-restaurado
+
+# Volume como vol-db-restaurado
+./scripts/03-restore.sh --mode import --type volume --file /opt/backups/fase-6/xxx/prod/volumes/prod-vol-db-xxx.tar.gz --as vol-db-restaurado
