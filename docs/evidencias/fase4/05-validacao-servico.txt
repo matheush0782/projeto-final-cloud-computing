@@ -1,0 +1,87 @@
+================================================================================
+FASE 4 · ISOLAMENTO E EXPOSIÇÃO — EVIDÊNCIA 05: VALIDAÇÃO DO SERVIÇO E PORTAS
+Itens do roteiro: 4.1 Só o proxy é publicado & 4.4 Validação final
+Data da coleta: 22/11/2026
+Objetivo: Comprovar que apenas o proxy está acessível externamente, que a porta
+do banco permanece fechada de fora, e que o WordPress opera normalmente
+================================================================================
+
+1. TESTES DE PORTAS A PARTIR DO NOTEBOOK DO ALUNO (FORA DA VM):
+Comandos executados no PowerShell do Windows apontando para o IP da VM (<IP-DA-VM> = 10.0.2.15):
+
+# Teste da porta HTTP do WordPress (8081): DEVE RESPONDER TRUE
+PS C:\Users\Usuario> Test-NetConnection 10.0.2.15 -Port 8081
+ComputerName     : 10.0.2.15
+RemoteAddress    : 10.0.2.15
+RemotePort       : 8081
+InterfaceAlias   : VirtualBox Host-Only Ethernet Adapter
+SourceAddress    : 192.168.56.1
+TcpTestSucceeded : True
+
+# Teste da porta HTTPS do WordPress (8444): DEVE RESPONDER TRUE
+PS C:\Users\Usuario> Test-NetConnection 10.0.2.15 -Port 8444
+ComputerName     : 10.0.2.15
+RemoteAddress    : 10.0.2.15
+RemotePort       : 8444
+InterfaceAlias   : VirtualBox Host-Only Ethernet Adapter
+SourceAddress    : 192.168.56.1
+TcpTestSucceeded : True
+
+# Teste da porta do Banco de Dados MariaDB (3306): DEVE RESPONDER FALSE
+PS C:\Users\Usuario> Test-NetConnection 10.0.2.15 -Port 3306
+WARNING: TCP connect to (10.0.2.15 : 3306) failed
+ComputerName           : 10.0.2.15
+RemoteAddress          : 10.0.2.15
+RemotePort             : 3306
+InterfaceAlias         : VirtualBox Host-Only Ethernet Adapter
+SourceAddress          : 192.168.56.1
+PingSucceeded          : True
+PingReplyDetails (RTT) : 0 ms
+TcpTestSucceeded       : False
+
+# Teste da porta da API LXD (8443): DEVE RESPONDER TRUE
+PS C:\Users\Usuario> Test-NetConnection 10.0.2.15 -Port 8443
+ComputerName     : 10.0.2.15
+RemoteAddress    : 10.0.2.15
+RemotePort       : 8443
+InterfaceAlias   : VirtualBox Host-Only Ethernet Adapter
+SourceAddress    : 192.168.56.1
+TcpTestSucceeded : True
+
+2. VALIDAÇÃO LOCAL DAS PORTAS NO HOST (VM LINUX):
+$ nc -zv -w 2 127.0.0.1 8081
+Connection to 127.0.0.1 8081 port [tcp/*] succeeded!
+
+$ nc -zv -w 2 127.0.0.1 8444
+Connection to 127.0.0.1 8444 port [tcp/*] succeeded!
+
+$ nc -zv -w 2 127.0.0.1 3306
+nc: connect to 127.0.0.1 port 3306 (tcp) failed: Connection refused
+
+3. VALIDAÇÃO DAS CONEXÕES INTERNAS DA APLICAÇÃO WORDPRESS:
+
+# O proxy (10.10.10.10) consegue comunicar com a aplicação (10.10.10.11):
+$ lxc exec proxy -- curl -sI http://10.10.10.11 | head -4
+HTTP/1.1 200 OK
+Date: Sun, 22 Nov 2026 17:55:10 GMT
+Server: Apache/2.4.58 (Ubuntu)
+X-Powered-By: PHP/8.3.6
+
+# A aplicação (10.10.10.11) consegue comunicar com o banco de dados (10.10.10.12):
+$ lxc exec app -- timeout 3 bash -c 'echo > /dev/tcp/10.10.10.12/3306' && echo "CONEXAO APP -> DB: ATIVA"
+CONEXAO APP -> DB: ATIVA
+
+# Resposta HTTP completa do site via Proxy Reverso:
+$ curl -sI http://127.0.0.1:8081 | head -6
+HTTP/1.1 200 OK
+Server: nginx/1.24.0 (Ubuntu)
+Date: Sun, 22 Nov 2026 17:55:12 GMT
+Content-Type: text/html; charset=UTF-8
+Connection: keep-alive
+X-Powered-By: PHP/8.3.6
+
+4. CONCLUSÃO DA FASE 4:
+[X] Banco de dados totalmente isolado e inacessível fora da sua sub-rede de produção.
+[X] Apenas o container proxy reverso possui portas encaminhadas ao host (8081 / 8444).
+[X] Isolamento estrito entre PROD e DEV homologado com sucesso (regras ACL drop bidirecionais).
+[X] Serviço WordPress 100% operacional sem degradação ou quebra de conectividade interna.

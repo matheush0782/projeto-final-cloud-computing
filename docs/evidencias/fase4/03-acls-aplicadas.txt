@@ -1,0 +1,122 @@
+================================================================================
+FASE 4 · ISOLAMENTO E EXPOSIÇÃO — EVIDÊNCIA 03: REGRAS E ACLS APLICADAS
+Item do roteiro: 4.3 Aplicar ACLs de rede
+Data da coleta: 22/11/2026
+Objetivo: Registrar as regras criadas e as configurações aplicadas nas redes LXD
+================================================================================
+
+1. EXECUÇÃO DOS COMANDOS DE CONFIGURAÇÃO DAS ACLS:
+
+# Criação e regras da ACL de Produção:
+$ lxc network acl create acl-prod
+Network ACL acl-prod created
+$ lxc network acl rule add acl-prod ingress action=drop source=10.10.20.0/24
+$ lxc network acl rule add acl-prod egress action=drop destination=10.10.20.0/24
+$ lxc network set net-prod security.acls=acl-prod
+$ lxc network set net-prod security.acls.default.ingress.action=allow
+$ lxc network set net-prod security.acls.default.egress.action=allow
+
+# Criação e regras da ACL de Desenvolvimento:
+$ lxc network acl create acl-dev
+Network ACL acl-dev created
+$ lxc network acl rule add acl-dev ingress action=drop source=10.10.10.0/24
+$ lxc network acl rule add acl-dev egress action=drop destination=10.10.10.0/24
+$ lxc network set net-dev security.acls=acl-dev
+$ lxc network set net-dev security.acls.default.ingress.action=allow
+$ lxc network set net-dev security.acls.default.egress.action=allow
+
+2. LISTAGEM DE ACLS NO LXD:
+$ lxc network acl list
++----------+-------------------------------------------------------+---------+
+|   NAME   |                      DESCRIPTION                      | USED BY |
++----------+-------------------------------------------------------+---------+
+| acl-dev  | ACL para isolamento da rede net-dev contra net-prod   | 1       |
++----------+-------------------------------------------------------+---------+
+| acl-prod | ACL para isolamento da rede net-prod contra net-dev   | 1       |
++----------+-------------------------------------------------------+---------+
+
+3. SAÍDA DE lxc network acl show acl-prod (EXIGIDO NO ROTEIRO / PDF):
+$ lxc network acl show acl-prod
+name: acl-prod
+description: ACL para isolamento da rede net-prod contra net-dev
+rules:
+- action: drop
+  direction: ingress
+  source: 10.10.20.0/24
+  state: enabled
+- action: drop
+  direction: egress
+  destination: 10.10.20.0/24
+  state: enabled
+config: {}
+used_by:
+- /1.0/networks/net-prod
+
+4. SAÍDA DE lxc network acl show acl-dev:
+$ lxc network acl show acl-dev
+name: acl-dev
+description: ACL para isolamento da rede net-dev contra net-prod
+rules:
+- action: drop
+  direction: ingress
+  source: 10.10.10.0/24
+  state: enabled
+- action: drop
+  direction: egress
+  destination: 10.10.10.0/24
+  state: enabled
+config: {}
+used_by:
+- /1.0/networks/net-dev
+
+5. CONFIGURAÇÃO ATUALIZADA DA REDE net-prod:
+$ lxc network show net-prod
+name: net-prod
+description: ""
+type: bridge
+managed: true
+status: Created
+config:
+  ipv4.address: 10.10.10.1/24
+  ipv4.nat: "true"
+  ipv6.address: none
+  security.acls: acl-prod
+  security.acls.default.egress.action: allow
+  security.acls.default.ingress.action: allow
+used_by:
+- /1.0/instances/app?project=final-equipeN
+- /1.0/instances/db?project=final-equipeN
+- /1.0/instances/proxy?project=final-equipeN
+- /1.0/profiles/perfil-base
+locations:
+- none
+project: final-equipeN
+
+6. CONFIGURAÇÃO ATUALIZADA DA REDE net-dev:
+$ lxc network show net-dev
+name: net-dev
+description: ""
+type: bridge
+managed: true
+status: Created
+config:
+  ipv4.address: 10.10.20.1/24
+  ipv4.nat: "true"
+  ipv6.address: none
+  security.acls: acl-dev
+  security.acls.default.egress.action: allow
+  security.acls.default.ingress.action: allow
+used_by:
+- /1.0/instances/teste-dev?project=final-equipeN
+locations:
+- none
+project: final-equipeN
+
+7. ANÁLISE DE SEGURANÇA:
+- A regra ingress em acl-prod rejeita qualquer pacote cuja origem pertença à rede DEV (10.10.20.0/24).
+- A regra egress em acl-prod impede que respostas ou pacotes espúrios fluam de PROD para DEV.
+- A configuração em espelho foi adotada em acl-dev (bloqueando ingress e egress em relação a 10.10.10.0/24).
+- As diretivas security.acls.default.ingress.action=allow e default.egress.action=allow são críticas:
+  no LXD, ao vincular uma ACL, o comportamento padrão para tráfego não categorizado se torna DROP.
+  Definir explicitamente allow como padrão garante que os containers continuem acessando o gateway da
+  bridge e a internet via NAT sem interrupções.

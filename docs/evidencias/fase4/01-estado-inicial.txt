@@ -1,0 +1,105 @@
+================================================================================
+FASE 4 · ISOLAMENTO E EXPOSIÇÃO — EVIDÊNCIA 01: ESTADO INICIAL
+Ambiente: Ubuntu 24.04 LTS (Kernel 6.8.0-49-generic) | LXD 5.21.7 LTS
+Projeto: final-equipeN | Data da coleta: 22/11/2026
+Objetivo: Registrar o estado das redes, instâncias e portas antes da aplicação das ACLs
+================================================================================
+
+1. LISTA DE REDES LXD ANTES DA FASE 4:
+$ lxc network list
++----------+----------+---------+----------------+---------------------------+-------------+---------+---------+
+|   NAME   |   TYPE   | MANAGED |      IPV4      |           IPV6            | DESCRIPTION | USED BY |  STATE  |
++----------+----------+---------+----------------+---------------------------+-------------+---------+---------+
+| enp0s3   | physical | NO      |                |                           |             | 0       |         |
++----------+----------+---------+----------------+---------------------------+-------------+---------+---------+
+| lxdbr0   | bridge   | YES     | 10.60.232.1/24 | fd42:a2c7:2e10:7707::1/64 |             | 2       | CREATED |
++----------+----------+---------+----------------+---------------------------+-------------+---------+---------+
+| net-dev  | bridge   | YES     | 10.10.20.1/24  | none                      |             | 0       | CREATED |
++----------+----------+---------+----------------+---------------------------+-------------+---------+---------+
+| net-prod | bridge   | YES     | 10.10.10.1/24  | none                      |             | 4       | CREATED |
++----------+----------+---------+----------------+---------------------------+-------------+---------+---------+
+
+2. LISTA DE INSTÂNCIAS DE PRODUÇÃO (PROJETO: final-equipeN):
+$ lxc list
++-------+---------+--------------------+------+-----------+-----------+
+| NAME  |  STATE  |        IPV4        | IPV6 |   TYPE    | SNAPSHOTS |
++-------+---------+--------------------+------+-----------+-----------+
+| app   | RUNNING | 10.10.10.11 (eth0) |      | CONTAINER | 0         |
++-------+---------+--------------------+------+-----------+-----------+
+| db    | RUNNING | 10.10.10.12 (eth0) |      | CONTAINER | 0         |
++-------+---------+--------------------+------+-----------+-----------+
+| proxy | RUNNING | 10.10.10.10 (eth0) |      | CONTAINER | 0         |
++-------+---------+--------------------+------+-----------+-----------+
+
+3. CONFIGURAÇÃO DA REDE net-prod ANTES DAS ACLS:
+$ lxc network show net-prod
+name: net-prod
+description: ""
+type: bridge
+managed: true
+status: Created
+config:
+  ipv4.address: 10.10.10.1/24
+  ipv4.nat: "true"
+  ipv6.address: none
+used_by:
+- /1.0/instances/app?project=final-equipeN
+- /1.0/instances/db?project=final-equipeN
+- /1.0/instances/proxy?project=final-equipeN
+- /1.0/profiles/perfil-base
+locations:
+- none
+project: final-equipeN
+# NOTA: Nenhuma diretiva "security.acls" configurada inicialmente.
+
+4. CONFIGURAÇÃO DA REDE net-dev ANTES DAS ACLS:
+$ lxc network show net-dev
+name: net-dev
+description: ""
+type: bridge
+managed: true
+status: Created
+config:
+  ipv4.address: 10.10.20.1/24
+  ipv4.nat: "true"
+  ipv6.address: none
+used_by: []
+locations:
+- none
+project: final-equipeN
+# NOTA: Nenhuma diretiva "security.acls" configurada inicialmente.
+
+5. VERIFICAÇÃO DE DISPOSITIVOS DAS INSTÂNCIAS (APENAS O PROXY É EXPOSTO):
+$ lxc config device list proxy
+eth0
+porta-http
+porta-https
+root
+
+$ lxc config device show proxy porta-http
+connect: tcp:127.0.0.1:80
+listen: tcp:0.0.0.0:8081
+type: proxy
+
+$ lxc config device show proxy porta-https
+connect: tcp:127.0.0.1:443
+listen: tcp:0.0.0.0:8444
+type: proxy
+
+$ lxc config device list db
+dados
+eth0
+root
+# CONFIRMAÇÃO: A instância do banco de dados (db) NÃO possui nenhum dispositivo do tipo proxy.
+
+6. VERIFICAÇÃO DE PORTAS EM ESCUTA NO HOST (VM):
+$ sudo ss -tlnp | grep -E ':(8081|8443|8444|3306|5432)'
+LISTEN 0      4096         0.0.0.0:8081      0.0.0.0:*    users:(("lxd",pid=1120,fd=14))
+LISTEN 0      4096         0.0.0.0:8443      0.0.0.0:*    users:(("lxd",pid=1120,fd=16))
+LISTEN 0      4096         0.0.0.0:8444      0.0.0.0:*    users:(("lxd",pid=1120,fd=18))
+
+# ANÁLISE:
+# - Porta 8081 (HTTP WordPress): exposta pelo proxy LXD (0.0.0.0) -> VÁLIDA
+# - Porta 8444 (HTTPS WordPress): exposta pelo proxy LXD (0.0.0.0) -> VÁLIDA
+# - Porta 8443 (API/UI LXD): gerenciamento do LXD (0.0.0.0) -> VÁLIDA
+# - Porta 3306 (MariaDB): NÃO está exposta na interface do host -> CONFORME ITEM 4.1

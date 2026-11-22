@@ -1,0 +1,52 @@
+================================================================================
+FASE 4 · ISOLAMENTO E EXPOSIÇÃO — EVIDÊNCIA 04: TESTE DEPOIS DAS ACLS
+Item do roteiro: 4.4 Repetir o teste e conferir que o serviço continua no ar
+Data da coleta: 22/11/2026
+Objetivo: Provar o bloqueio efetivo entre DEV e PROD e conferir a continuidade
+do acesso à internet e do serviço web
+================================================================================
+
+1. TESTE DE CONECTIVIDADE DEV -> BANCO PROD APÓS APLICAÇÃO DAS ACLS:
+Comando executado a partir de teste-dev (rede net-dev) direcionado ao db (10.10.10.12:3306):
+
+$ lxc exec teste-dev -- bash -c 'timeout 3 bash -c "echo > /dev/tcp/10.10.10.12/3306" && echo ALCANCOU || echo BLOQUEADO'
+BLOQUEADO
+
+2. TESTE DE ICMP (PING) APÓS APLICAÇÃO DAS ACLS:
+$ lxc exec teste-dev -- ping -c 3 -W 1 10.10.10.12
+PING 10.10.10.12 (10.10.10.12) 56(84) bytes of data.
+
+--- 10.10.10.12 ping statistics ---
+3 packets transmitted, 0 received, 100% packet loss, time 2051ms
+
+3. COMPARAÇÃO ANTES x DEPOIS (EXIGIDO NO ROTEIRO / PDF):
++------------------------------------+--------------------------+-----------------------+
+|                TESTE               | FASE 4.2 (SEM ACLs)      | FASE 4.4 (COM ACLs)   |
++------------------------------------+--------------------------+-----------------------+
+| Conexão TCP 10.10.10.12:3306 (db)  | ALCANCOU  [VULNERÁVEL]   | BLOQUEADO [ISOLADO]   |
+| Conexão ICMP (Ping 10.10.10.12)    | 0% perda (time=0.072ms)  | 100% perda (Timeout)  |
+| Isolamento DEV <-> PROD            | NÃO CONFORME             | CONFORME (DROP ATIVO) |
++------------------------------------+--------------------------+-----------------------+
+
+4. VERIFICAÇÃO DE SAÍDA PARA A INTERNET A PARTIR DA APLICAÇÃO (PROD):
+Comprova que as regras de default allow mantiveram o NAT funcional para os containers:
+
+$ lxc exec app -- curl -sI https://deb.debian.org | head -1
+HTTP/2 200 
+
+$ lxc exec app -- curl -sI https://wordpress.org | head -1
+HTTP/2 200 
+
+5. VERIFICAÇÃO DE DISPONIBILIDADE DO SERVIÇO WORDPRESS:
+Comprova que o tráfego do usuário e o proxy reverso continuam operando normalmente:
+
+$ curl -sI http://127.0.0.1:8081 | head -1
+HTTP/1.1 200 OK
+
+6. LIMPEZA DA INSTÂNCIA TEMPORÁRIA:
+$ lxc delete -f teste-dev
+$ lxc list teste-dev
++------+-------+------+------+------+-----------+
+| NAME | STATE | IPV4 | IPV6 | TYPE | SNAPSHOTS |
++------+-------+------+------+------+-----------+
+# Container de teste removido com sucesso.
