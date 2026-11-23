@@ -182,16 +182,3 @@ fi
 echo "[OK] Restore concluido: $TYPE $RESOURCE -> $SNAP"
 trap - EXIT
 restore_state
-
-./scripts/03-restore.sh --mode snapshot --type instance --resource app --snapshot snap-20261122-180000 --dry-run
-./scripts/03-restore.sh --mode snapshot --type volume --resource vol-db --snapshot snap-20261122-180000
-
-# Instancia como db-restaurado
-./scripts/03-restore.sh --mode import --type instance --file /opt/backups/fase-6/20261122-180000/prod/instancias/prod-db-20261122-180000.tar.gz --as db-restaurado
-
-# Volume como vol-db-restaurado
-./scripts/03-restore.sh --mode import --type volume --file /opt/backups/fase-6/20261122-180000/prod/volumes/prod-vol-db-20261122-180000.tar.gz --as vol-db-restaurado
-
-lxc info --project final-equipeN db-restaurado
-lxc storage volume info --project final-equipeN pool-final vol-db-restaurado
-lxc exec --project final-equipeN db-restaurado -- ls -la /var/lib/mysql

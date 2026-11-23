@@ -75,19 +75,3 @@ for v in "${VOLUMES[@]}"; do clean_one "volume" "$v" || true; done
 if [ "$DRY_RUN" -eq 1 ]; then echo "[DRY-RUN] Nenhum snapshot apagado. Para apagar: $0 --execute --yes"; fi
 [ "$FAILED" -eq 0 ] || { echo "[ERRO] Limpeza com falhas" >&2; exit 1; }
 echo "[OK] Limpeza concluida"
-
-./scripts/04-limpeza.sh --dry-run
-KEEP=10 ./scripts/04-limpeza.sh --dry-run
-./scripts/04-limpeza.sh --execute --yes
-
-# 1. Restaurar volumes primeiro
-./scripts/03-restore.sh --mode snapshot --type volume --resource vol-db --snapshot snap-20261122-180000
-./scripts/03-restore.sh --mode snapshot --type volume --resource vol-uploads --snapshot snap-20261122-180000
-# 2. Restaurar instancias
-./scripts/03-restore.sh --mode snapshot --type instance --resource db --snapshot snap-20261122-180000
-./scripts/03-restore.sh --mode snapshot --type instance --resource app --snapshot snap-20261122-180000
-./scripts/03-restore.sh --mode snapshot --type instance --resource proxy --snapshot snap-20261122-180000
-# 3. Verificar
-lxc exec --project final-equipeN db -- systemctl status mariadb
-lxc exec --project final-equipeN proxy -- systemctl status nginx
-lxc exec --project final-equipeN app -- systemctl status apache2

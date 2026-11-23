@@ -94,14 +94,3 @@ if [ "$FAILED" -eq 0 ]; then
 fi
 [ "$FAILED" -eq 0 ] || { echo "[ERRO] Backup com FALHAS. Veja $MANIFEST" >&2; exit 1; }
 echo "[OK] Backup concluido em $DEST"
-
-./scripts/02-backup.sh --dry-run
-./scripts/02-backup.sh
-
-/opt/backups/fase-6/<data>/
-├── prod/instancias/*.tar.gz
-├── prod/volumes/*.tar.gz
-├── dev/instancias/*.tar.gz
-├── dev/volumes/*.tar.gz
-├── MANIFEST.txt
-└── sha256sums.txt
