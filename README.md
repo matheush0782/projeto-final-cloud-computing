@@ -1,184 +1,165 @@
 # Projeto Final — Cloud Computing
 
-## 1. Objetivo
+Projeto acadêmico de implementação de uma infraestrutura de hospedagem em nuvem privada, utilizando **Ubuntu 24.04, LXD e containers Linux**. A aplicação escolhida para a trilha é o **WordPress**, publicado por meio de um proxy reverso Nginx e conectado a um banco de dados MariaDB.
 
-Implementar uma infraestrutura de hospedagem de um site WordPress utilizando Ubuntu 24.04, LXD, containers Linux, Nginx, Apache, PHP e MariaDB.
+O repositório reúne os arquivos de configuração, profiles, scripts de automação, testes e documentação utilizados na construção e validação do ambiente.
 
-Este documento preserva o histórico da entrega parcial e registra a integração dos scripts do Samuel com a Fase 5 já presente na `dev`. As saídas antigas não comprovam execução dos scripts novos.
+## Objetivos
 
-Consulte [automação integrada](docs/automacao.md), [testes reais na VM](docs/testes-na-vm.md) e [monitoramento](docs/monitoramento.md) antes de implantar ou recriar recursos.
+- Provisionar e administrar uma infraestrutura de containers com LXD.
+- Separar os ambientes de produção (PROD) e desenvolvimento (DEV).
+- Hospedar o WordPress com Nginx, Apache, PHP e MariaDB.
+- Controlar a comunicação entre redes e a exposição de serviços.
+- Implementar mecanismos de snapshots, backup e restauração.
+- Automatizar implantação, monitoramento e coleta de evidências.
 
-## 2. Ambiente utilizado
+## Tecnologias
 
-- Sistema operacional: Ubuntu 24.04
-- Virtualização: VirtualBox
-- Gerenciador de containers: LXD 5.21.7 LTS
-- Armazenamento LXD: pool-final
-- Driver de armazenamento: dir
-- Projeto LXD: final-equipeN
+| Tecnologia | Utilização |
+|---|---|
+| Ubuntu 24.04 LTS | Sistema operacional da máquina virtual |
+| VirtualBox | Virtualização do ambiente |
+| LXD 5.21.7 LTS | Gerenciamento de containers, redes e armazenamento |
+| Nginx | Proxy reverso |
+| Apache | Servidor web da aplicação |
+| PHP | Execução do WordPress |
+| WordPress | Aplicação hospedada |
+| MariaDB | Banco de dados |
+| Bash e Python | Automação e testes |
+| GitHub Actions | Validação automatizada do repositório |
 
-## 3. Arquitetura
+## Arquitetura
 
-A infraestrutura utiliza três containers principais:
+A infraestrutura é dividida em dois ambientes isolados, PROD e DEV. Cada ambiente possui um proxy reverso, uma aplicação WordPress e um banco de dados.
 
-| Container | Função | Endereço IP |
+### Produção (PROD)
+
+| Container | Função | Endereço |
 |---|---|---|
-| proxy | Nginx — proxy reverso | 10.10.10.10 |
-| app | Apache, PHP e WordPress | 10.10.10.11 |
-| db | MariaDB | 10.10.10.12 |
+| `proxy` | Nginx — proxy reverso | `10.10.10.10` |
+| `app` | Apache, PHP e WordPress | `10.10.10.11` |
+| `db` | MariaDB | `10.10.10.12` |
 
-O fluxo de acesso é:
+### Desenvolvimento (DEV)
 
-1. O usuário acessa o serviço pela porta 8081.
-2. O Nginx recebe a requisição no container proxy.
-3. O Nginx encaminha a requisição para o container app.
-4. O WordPress utiliza o MariaDB no container db.
+| Container | Função | Endereço |
+|---|---|---|
+| `dev-proxy` | Nginx — proxy reverso | `10.10.20.10` |
+| `dev-app` | Apache, PHP e WordPress | `10.10.20.11` |
+| `dev-db` | MariaDB | `10.10.20.12` |
 
-## 4. Redes e isolamento (Fase 4)
+### Redes e portas
 
-Foram criadas duas redes:
+| Recurso | Configuração |
+|---|---|
+| Rede PROD | `net-prod` — `10.10.10.0/24` |
+| Rede DEV | `net-dev` — `10.10.20.0/24` |
+| HTTP PROD | `8081` |
+| HTTPS PROD | `8444` |
+| HTTP DEV | `8082` |
+| HTTPS DEV | `8445` |
+| API/UI do LXD | `8443` |
 
-- net-prod: 10.10.10.0/24 — utilizada pelos containers da aplicação.
-- net-dev: 10.10.20.0/24 — criada para o ambiente de desenvolvimento.
+A porta `8443` é destinada ao gerenciamento do LXD e não representa o HTTPS do WordPress. O banco de dados utiliza a porta interna `3306` e não deve ser exposto diretamente ao host ou à rede externa.
 
-A rede net-prod está associada aos containers proxy, app e db. Para garantir o isolamento estrito entre os ambientes e impedir que instâncias de DEV acessem a porta 3306 do banco de produção, foram aplicadas ACLs de rede (`acl-prod` e `acl-dev`) com políticas de descarte bidirecional e `default allow` para a internet. Consulte [isolamento de redes](docs/fase4-isolamento.md).
+O fluxo de acesso da aplicação é:
 
-## 5. Profiles LXD
+1. O usuário acessa a porta HTTP ou HTTPS do ambiente.
+2. O Nginx recebe a requisição no container de proxy.
+3. O proxy encaminha a requisição para o container da aplicação.
+4. O WordPress acessa o MariaDB pela rede interna do respectivo ambiente.
 
-Foram criados quatro profiles:
+## Profiles e armazenamento
 
-- perfil-base: configura recursos, rede e disco raiz.
-- perfil-proxy: instala Nginx e OpenSSL.
-- perfil-app: instala Apache, PHP e extensões necessárias ao WordPress.
-- perfil-db: instala MariaDB e define limite de memória de 1 GiB.
+O projeto utiliza quatro profiles LXD:
 
-O perfil-base define limite de 1 CPU e 512 MiB de memória. Os demais profiles complementam essa configuração.
+- **perfil-base:** configura recursos, rede e disco raiz.
+- **perfil-proxy:** configura Nginx e OpenSSL.
+- **perfil-app:** configura Apache, PHP e extensões necessárias ao WordPress.
+- **perfil-db:** configura MariaDB e seus limites de recursos.
 
-## 6. Armazenamento e persistência
+O pool de armazenamento utilizado é `pool-final`, com driver `dir`. Os volumes personalizados separam os dados persistentes do ciclo de vida dos containers:
 
-Foi criado o pool de armazenamento pool-final, utilizando o driver dir.
+| Volume | Utilização |
+|---|---|
+| `vol-db` | Dados do MariaDB em PROD |
+| `vol-uploads` | Arquivos enviados ao WordPress em PROD |
+| `dev-vol-db` | Dados do MariaDB em DEV |
+| `dev-vol-uploads` | Arquivos enviados ao WordPress em DEV |
 
-Foram criados dois volumes:
+Snapshots de instâncias não incluem volumes personalizados. Por isso, os procedimentos de proteção de dados precisam considerar os dois recursos.
 
-- vol-db: utilizado para armazenar os dados do MariaDB.
-- vol-uploads: montado no diretório /var/www/html/wp-content/uploads do container app.
+## Segurança e isolamento
 
-Esses volumes foram associados aos respectivos containers para separar os dados persistentes do ciclo de vida das instâncias.
+O projeto utiliza Network ACLs do LXD para controlar o tráfego entre `net-prod` e `net-dev`. As regras `acl-prod` e `acl-dev` bloqueiam a comunicação entre as sub-redes, preservando o tráfego necessário dentro de cada ambiente.
 
-O teste formal de persistência por exclusão e recriação dos containers ainda está pendente.
+Outras medidas previstas na implementação:
 
-## 7. WordPress
+- Exposição dos serviços web por meio dos proxies reversos.
+- Banco de dados sem publicação direta de porta externa.
+- Configuração de HTTPS com uma autoridade certificadora própria.
+- Separação de dados persistentes em volumes personalizados.
+- Proteção de credenciais e materiais privados fora do repositório.
+- Cuidados específicos nos procedimentos de remoção e recriação de containers.
 
-O WordPress foi instalado no container app, utilizando Apache e PHP.
+## Organização do repositório
 
-O banco de dados utilizado é MariaDB, hospedado no container db.
+| Diretório/arquivo | Conteúdo |
+|---|---|
+| `conf/` | Configurações de serviços, redes, ACLs e TLS |
+| `profiles/` | Profiles utilizados pelas instâncias LXD |
+| `networks/` | Definições das redes PROD e DEV |
+| `scripts/` | Scripts de implantação, segurança, backup, restauração e monitoramento |
+| `tests/` | Testes automatizados e mocks |
+| `docs/` | Documentação técnica, procedimentos e evidências |
+| `.github/workflows/` | Fluxos de validação automatizada |
 
-O site foi configurado com o título CloudPress e recebeu uma publicação intitulada:
+## Automação e testes
 
-"Computação em Nuvem: Transformando o Mundo Digital"
+Os scripts em `scripts/` automatizam tarefas da infraestrutura, incluindo:
 
-A publicação contém texto explicativo e uma imagem relacionada à computação em nuvem.
+- Implantação e remoção controlada dos ambientes.
+- Configuração e validação das ACLs.
+- Configuração de TLS.
+- Criação de snapshots e backups.
+- Restauração de instâncias e volumes.
+- Limpeza de snapshots antigos.
+- Monitoramento de recursos e verificação de limites.
+- Registro de evidências.
 
-O acesso local é realizado pelo endereço:
-
-http://127.0.0.1:8081
-
-A porta 8081 da máquina virtual é encaminhada para a porta 8081 do computador hospedeiro por meio de uma regra de encaminhamento de portas do VirtualBox.
-
-## 8. Proxy reverso
-
-O container proxy utiliza Nginx para receber as requisições HTTP e encaminhá-las ao container app, no endereço 10.10.10.11.
-
-A configuração está armazenada em:
-
-conf/nginx-servico.conf
-
-## 9. Backups
-
-Foram gerados backups locais:
-
-- backup/wordpress.sql: exportação do banco de dados.
-- backup/wordpress-files.tar.gz: cópia dos arquivos do WordPress.
-
-Os arquivos foram verificados e a pasta backup está incluída no .gitignore, pois contém informações sensíveis.
-
-Os backups não devem ser enviados ao repositório público.
-
-## 10. Evidências
-
-As evidências da implementação estão armazenadas em:
-
-docs/evidencias/
-
-Entre os registros estão:
-
-- Informações do ambiente virtual.
-- Recursos de memória e armazenamento.
-- Redes e pool de armazenamento.
-- Lista dos containers.
-- Capturas de tela do WordPress e da publicação.
-
-## 11. Limitações e atividades pendentes
-
-- O suporte a KVM não estava disponível no ambiente, devido à ausência de /dev/kvm. A limitação foi identificada e documentada.
-- A infraestrutura WordPress está funcionando e foi verificada após reinicializações da máquina virtual.
-- Ainda é necessário realizar o teste formal de persistência dos volumes, recriando os containers db e app conforme o roteiro do projeto.
-- As demais fases do projeto serão realizadas conforme o cronograma da disciplina.
-
-## 12. Observação
-
-Este README representa o estado parcial da implementação. Ele não indica que todas as etapas do projeto final foram concluídas.
-
-## 13. Integração do Samuel com a Fase 5
-
-A revisão parte da `dev` no commit `8145908`, após a incorporação da Fase 5 pela PR #3. A automação da PR #1 foi reaproveitada sem `.DS_Store` e sem excluir as evidências anteriores. Os arquivos de acesso/TLS da equipe foram preservados.
-
-O deploy não gera mais um certificado de serviço autoassinado separado. Ele usa a CA própria e `scripts/fase5-tls.sh` como estratégia única de TLS, com os caminhos `/etc/nginx/ssl/servico.crt` e `/etc/nginx/ssl/servico.key`. Os materiais em `conf/tls/prod/` e `conf/tls/dev/` são locais, privados e ignorados pelo Git.
-
-`fase5-tls.sh` atualiza as URLs WordPress com PHP, ativa a configuração Nginx e verifica/atualiza `porta-https` sem duplicá-lo. Na recriação, reaplica os certificados da CA existente. O deploy exige `IP_VM` real e `IP_SITE` válido para esse fluxo; `--http-only` é a alternativa explícita para manter apenas HTTP enquanto a equipe valida TLS.
-
-## 14. Portas e remoção segura
-
-PROD: HTTP **8081**, HTTPS do WordPress **8444**. DEV: HTTP **8082**, HTTPS do WordPress **8445**. A porta **8443** pertence exclusivamente à API/UI do LXD, não é evidência de HTTPS WordPress. Depois da ativação TLS, HTTP redireciona para a porta HTTPS do ambiente.
-
-`destroy.sh` e `deploy.sh --recreate` removem containers, discos raiz e snapshots das instâncias, mantendo banco/uploads em volumes personalizados por padrão. Temas/plugins personalizados no root precisam de backup. `destroy.sh --volumes` também apaga os volumes e seus dados, exigindo uma confirmação adicional: `--yes` sozinho não autoriza essa exclusão.
+Para executar a suíte de validação local, em um ambiente Linux com as dependências descritas na documentação:
 
 ```bash
-ENV=dev bash scripts/deploy.sh --dry-run
-ENV=dev bash scripts/destroy.sh --volumes --dry-run
+bash tests/run_local.sh
 ```
 
-Esses planos não consultam nem alteram o LXD. Não execute a exclusão de volumes de PROD sem backup verificado e acordo da equipe.
+Os testes locais utilizam mocks para comandos LXD e ferramentas de rede quando apropriado. Portanto, um teste automatizado aprovado não substitui a validação dos serviços e recursos em uma VM com LXD real.
 
-## 15. Validação e evidências pendentes
+## Documentação
 
-```bash
-ENV=dev bash scripts/monitor.sh --once
-ENV=dev bash scripts/test-limits.sh
-ENV=dev bash scripts/test-limits.sh --load
-ENV=dev IP_SITE=127.0.0.1 bash scripts/registrar-evidencias.sh
-```
+- [Isolamento de redes e ACLs — Fase 4](docs/fase4-isolamento.md)
+- [Guia de snapshots, backup, restauração e limpeza — Fase 6](docs/README.md)
+- [Validação e auditoria da Fase 6](docs/fase-6/README.md)
+- [Automação e procedimentos de implantação](docs/automacao.md)
+- [Testes e validações na VM](docs/testes-na-vm.md)
+- [Validação local do código](docs/validacao-local.md)
+- [Monitoramento e teste de limites](docs/monitoramento.md)
+- [Evidências da implementação](docs/evidencias/)
 
-A carga é opcional, limitada a 20 segundos dentro de `dev-app`. O coletor só lê informações e registra resultados; não executa deploy, destroy ou carga. Não substitui logs da reconstrução, o teste de persistência e prints do navegador.
+## Estado das validações
 
-Testes locais em `tests/` verificam código com LXC/curl simulados e fixtures PHP/OpenSSL; não equivalem a testes na VM. A validação real de PROD/DEV, HTTPS com CA confiável, reconstrução, limites e monitoramento ainda precisa ser realizada e registrada pela equipe. Não publique chaves privadas, senhas, tokens ou backups nas evidências.
+A documentação registra a aprovação de **45 testes automatizados locais**, além de verificações de sintaxe, lint e testes locais relacionados à Fase 5. Esses resultados validam partes do código e da automação, mas não comprovam, por si só, o funcionamento de uma implantação em um daemon LXD real.
 
-## 16. Correção de segurança da PR #4
+As validações de infraestrutura devem ser registradas separadamente, incluindo implantação dos ambientes, isolamento efetivo das redes, acesso HTTP/HTTPS, persistência após recriação, limites de recursos e monitoramento. Consulte os documentos de cada fase para identificar os procedimentos e as pendências correspondentes.
 
-O instalador configura `wp-config.php` como **`root:www-data`, modo `0640`**: Apache/PHP lê pelo grupo, sem escrita direta no arquivo. A Fase 5 preserva essas permissões ao alterar URLs. Isso não impede substituição via diretório pai, que continua com o comportamento de propriedade existente.
+## Cuidados importantes
 
-O deploy agora transmite a senha por stdin não interativo para MariaDB, WordPress e a checagem PHP, sem colocá-la em argv. Os dois instaladores exigem `--password-stdin`; atualize os três scripts juntos. Senhas lidas com `read -rsp` continuam compatíveis com `DB_PASS` e com os fallbacks PROD/DEV. A limpeza de temporários e os limites desta proteção estão em [automação](docs/automacao.md).
+- Confirme o projeto LXD selecionado antes de executar scripts. Os scripts utilizam o projeto configurado, cujo padrão documentado é `final-equipeN`; ajuste a variável correspondente caso o nome real do projeto seja diferente.
+- Faça e verifique backups antes de operações que possam afetar dados.
+- Teste procedimentos de recriação e restauração primeiro no ambiente DEV.
+- A opção `--volumes` em procedimentos de remoção pode apagar dados persistentes. Não a utilize em PROD sem backup verificado e autorização da equipe.
+- Não envie ao GitHub senhas, tokens, chaves privadas, arquivos `.env`, `wp-config.php` ou backups com dados da aplicação.
 
-Fazer `git pull` não corrige automaticamente o arquivo de uma instalação existente. Use o procedimento de proprietário/modo da documentação, após backup e confirmação do destino, sem apagar/recriar containers apenas para isso.
+---
 
-A suíte local passou com **45 testes Python, sem falhas, erros ou skips**, além de Bash/PHP/ShellCheck e do teste local da Fase 5. As permissões foram verificadas em arquivos temporários reais; LXD/curl continuam simulados. Veja [validação local](docs/validacao-local.md). Os testes na VM/navegador permanecem pendentes.
-
-## 17. Isolamento de redes e ACLs (Fase 4)
-
-A Fase 4 implementa e valida o isolamento de rede entre os ambientes de produção e desenvolvimento, além de garantir que apenas as portas do proxy (HTTP 8081 e HTTPS 8444) estejam expostas para o exterior.
-
-- **Arquivos de configuração**: `conf/acl-prod.yaml` e `conf/acl-dev.yaml` definem o descarte bidirecional entre `10.10.10.0/24` e `10.10.20.0/24`.
-- **Script de automação**: `scripts/fase4-acls.sh` gerencia as regras de forma idempotente, com suporte a `--status`, `--dry-run`, `--apply`, `--test` e `--rollback`.
-- **Validação de isolamento**: antes da ACL, a rede DEV alcançava o MariaDB (`ALCANCOU`); após a aplicação, o tráfego é bloqueado (`BLOQUEADO`), enquanto a saída para a internet e o proxy do WordPress continuam íntegros.
-- **Documentação e evidências**: veja o detalhamento em [docs/fase4-isolamento.md](docs/fase4-isolamento.md) e as saídas em [docs/evidencias/fase4/](docs/evidencias/fase4/).
-
+Projeto desenvolvido como atividade acadêmica da disciplina de **Cloud Computing — UNINASSAU**.
