@@ -1,0 +1,7 @@
+config:
+  ipv4.address: 10.10.20.1
+  ipv4.nat: true
+  ipv6.address: none
+description: Rede de desenvolvimento para o projeto Cloud Computing
+name: net-dev
+type: bridge

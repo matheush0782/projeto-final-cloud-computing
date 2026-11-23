@@ -145,11 +145,14 @@ if a == ["remote", "get-default"]:
 
 if a[:1] == ["info"]:
     name = a[1] if len(a) > 1 else ""
-    if name == "local:":
+    if name == "local" or name == "local:":
         result("LXD MOCK — não é VM real")
-    if instance_key(name) not in state["instances"]:
-        result("Instância ausente", 1)
-    result(f"Name: {name}\nStatus: Running")
+    elif name == "":
+        result("LXD MOCK — namespace vazio")
+    else:
+        if name not in state["instances"]:
+            result("Instância ausente", 1)
+        result(state["instances"][name])
 
 if a[:2] == ["project", "list"]:
     result([{"name": name, "config": cfg} for name, cfg in state["projects"].items()])

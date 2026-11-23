@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT="${PROJECT:-final-equipeN}"
+POOL="${POOL:-pool-final}"
+
+MODE="snapshot"; TYPE=""; RESOURCE=""; SNAP=""; FILE=""; AS_NAME=""
+DRY_RUN=0; YES=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --mode) MODE="$2"; shift 2 ;;
+    --type) TYPE="$2"; shift 2 ;;
+    --resource) RESOURCE="$2"; shift 2 ;;
+    --snapshot) SNAP="$2"; shift 2 ;;
+    --file) FILE="$2"; shift 2 ;;
+    --as) AS_NAME="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --yes) YES=1; shift ;;
+    --help)
+      echo "Snapshot: $0 --mode snapshot --type instance|volume --resource NOME --snapshot snap-XXX"
+      echo "Import:   $0 --mode import --type instance|volume --file backup.tar.gz --as NOVO-NOME"
+      echo "Ex: $0 --mode import --type instance --file prod-db-xxx.tar.gz --as db-restaurado"
+      echo "Ex: $0 --mode import --type volume --file prod-vol-db-xxx.tar.gz --as vol-db-restaurado"
+      exit 0 ;;
+    *) echo "[ERRO] Arg desconhecido: $1" >&2; exit 2 ;;
+  esac
+done
+
+command -v lxc >/dev/null || { echo "[ERRO] lxc nao encontrado" >&2; exit 1; }
+
+# CORRECAO 7.6: sem is_running() com grep. Usa get_state que diferencia Running/Stopped/ERROR
+get_state() {
+  local out
+  if out="$(lxc info --project "$PROJECT" "$1" 2>&1)"; then
+    :
+  else
+    echo "[ERRO] Falha ao consultar $1: $out" >&2
+    echo "ERROR"
+    return 1
+  fi
+  if echo "$out" | grep -qi "^Status:.*Running"; then echo "Running"; return 0; fi
+  if echo "$out" | grep -qi "^Status:.*Stopped"; then echo "Stopped"; return 0; fi
+  echo "ERROR"; return 1
+}
+
+get_owner() {
+  case "$1" in vol-db) echo "db" ;; vol-uploads) echo "app" ;; dev-vol-db) echo "dev-db" ;; dev-vol-uploads) echo "dev-app" ;; *) echo "" ;; esac
+}
+
+declare -A WAS_RUNNING=()
+restore_state() {
+  for inst in "${!WAS_RUNNING[@]}"; do
+    if [[ "${WAS_RUNNING[$inst]}" == "Running" ]]; then
+      echo "[INFO] Religando $inst apos restore (estava Running antes)"
+      lxc start --project "$PROJECT" "$inst" || echo "[ERRO] Falha ao religar $inst" >&2
+    fi
+  done
+}
+trap restore_state EXIT
+
+# CORRECAO 7.7: extrai so a 1a coluna do CSV, nao compara linha inteira
+snapshot_exists() {
+  local kind="$1" name="$2" want="$3" tmp errf out
+  tmp="$(mktemp)"; errf="$(mktemp)"
+  if [ "$kind" = "instance" ]; then
+    if ! lxc snapshot list --project "$PROJECT" "$name" --format csv > "$tmp" 2> "$errf"; then
+      echo "[ERRO] Falha ao listar snapshots de $name:" >&2; cat "$errf" >&2; rm -f "$tmp" "$errf"; return 2
+    fi
+  else
+    if ! lxc storage volume snapshot list --project "$PROJECT" "$POOL" "$name" --format csv > "$tmp" 2> "$errf"; then
+      echo "[ERRO] Falha ao listar snapshots do volume $name:" >&2; cat "$errf" >&2; rm -f "$tmp" "$errf"; return 2
+    fi
+  fi
+  rm -f "$errf"
+  # CSV pode ter varias colunas: pega so a primeira
+  if cut -d, -f1 "$tmp" | grep -qx "$want"; then rm -f "$tmp"; return 0; else rm -f "$tmp"; return 1; fi
+}
+
+find_checksum_file() {
+  local dir
+  dir="$(dirname "$1")"
+  for _ in 1 2 3 4 5; do
+    if [ -f "$dir/sha256sums.txt" ]; then echo "$dir/sha256sums.txt"; return 0; fi
+    [ "$dir" = "/" ] && break
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+# ---------- MODO IMPORT ----------
+if [ "$MODE" = "import" ]; then
+  [ -n "$FILE" ] || { echo "[ERRO] Informe --file" >&2; exit 2; }
+  [ -n "$AS_NAME" ] || { echo "[ERRO] Informe --as NOVO-NOME" >&2; exit 2; }
+  [ -f "$FILE" ] || { echo "[ERRO] Arquivo $FILE nao existe" >&2; exit 1; }
+  [ -s "$FILE" ] || { echo "[ERRO] Arquivo $FILE vazio" >&2; exit 1; }
+
+  # CORRECAO 7.4: procura sha256sums.txt subindo ate a raiz do backup
+  SUMS="$(find_checksum_file "$FILE")" || SUMS=""
+  if [ -n "$SUMS" ]; then
+    echo "[INFO] Validando checksum em $SUMS"
+    SUMDIR="$(dirname "$SUMS")"
+    if (cd "$SUMDIR" && sha256sum -c sha256sums.txt 2>/dev/null | grep -q "$(basename "$FILE"): OK"); then
+      echo "[OK] Checksum OK para $FILE"
+    else echo "[ERRO] Checksum FALHOU para $FILE. Abortando import." >&2; exit 1; fi
+  else echo "[ERRO] sha256sums.txt nao encontrado subindo pastas. Abortando por seguranca." >&2; exit 1; fi
+
+  if [ "$TYPE" = "instance" ]; then
+    if lxc info --project "$PROJECT" "$AS_NAME" >/dev/null 2>&1; then echo "[ERRO] Ja existe instancia $AS_NAME. Use outro nome." >&2; exit 1; fi
+  else
+    if lxc storage volume list --project "$PROJECT" "$POOL" --format csv 2>/dev/null | cut -d, -f1 | grep -qx "$AS_NAME"; then echo "[ERRO] Ja existe volume $AS_NAME. Use outro nome." >&2; exit 1; fi
+  fi
+
+  echo "[AVISO] Vai importar $TYPE $FILE como $AS_NAME no projeto $PROJECT"
+  if [ "$YES" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then read -r -p "Digite CONFIRMAR: " ans; [ "$ans" = "CONFIRMAR" ] || { echo "Cancelado"; trap - EXIT; exit 0; }; fi
+  if [ "$DRY_RUN" -eq 1 ]; then echo "[DRY-RUN] Importaria $TYPE $FILE como $AS_NAME"; trap - EXIT; exit 0; fi
+
+  if [ "$TYPE" = "instance" ]; then
+    # CORRECAO 7.3 --as: nao confia que lxc import aceita nome.
+    # 1. Lista antes, 2. Importa sem nome, 3. Descobre quem apareceu, 4. lxc move para AS_NAME
+    BEFORE="$(mktemp)"; AFTER="$(mktemp)"
+    lxc list --project "$PROJECT" --format csv | cut -d, -f1 | sort > "$BEFORE" || { echo "[ERRO] Falha ao listar instancias" >&2; exit 1; }
+    if ! lxc import --project "$PROJECT" "$FILE"; then echo "[ERRO] Falha no import" >&2; rm -f "$BEFORE" "$AFTER"; exit 1; fi
+    lxc list --project "$PROJECT" --format csv | cut -d, -f1 | sort > "$AFTER"
+    NEW_NAME="$(comm -13 "$BEFORE" "$AFTER" | head -n 1)"
+    rm -f "$BEFORE" "$AFTER"
+    if [ -z "$NEW_NAME" ]; then
+      # Pode ser que ja importou com o nome desejado em versoes novas
+      if lxc info --project "$PROJECT" "$AS_NAME" >/dev/null 2>&1; then NEW_NAME="$AS_NAME"; else echo "[ERRO] Importou mas nao identifiquei a instancia nova. Verifique com lxc list --project $PROJECT" >&2; exit 1; fi
+    fi
+    echo "[INFO] Instancia importada como $NEW_NAME, renomeando para $AS_NAME"
+    if [ "$NEW_NAME" != "$AS_NAME" ]; then
+      if ! lxc move --project "$PROJECT" "$NEW_NAME" "$AS_NAME"; then
+        echo "[ERRO] Falha ao renomear $NEW_NAME para $AS_NAME. Recurso ficou como $NEW_NAME, remova manualmente se preciso." >&2; exit 1
+      fi
+    fi
+    # Verifica se o nome final realmente existe
+    if ! lxc info --project "$PROJECT" "$AS_NAME" >/dev/null 2>&1; then echo "[ERRO] $AS_NAME nao existe apos import+move" >&2; exit 1; fi
+    echo "[OK] Importado como $AS_NAME"
+    lxc info --project "$PROJECT" "$AS_NAME" | head -20
+  else
+    if ! lxc storage volume import --project "$PROJECT" "$POOL" "$FILE" "$AS_NAME"; then echo "[ERRO] Falha import volume" >&2; exit 1; fi
+    echo "[OK] Volume importado como $AS_NAME"
+    lxc storage volume list --project "$PROJECT" "$POOL" | grep "$AS_NAME" || true
+    lxc storage volume info --project "$PROJECT" "$POOL" "$AS_NAME" | head -20
+  fi
+  echo "[OK] Import concluido: $TYPE -> $AS_NAME"
+  trap - EXIT; exit 0
+fi
+
+# ---------- MODO SNAPSHOT ----------
+[ -n "$TYPE" ] || { echo "[ERRO] Informe --type instance|volume" >&2; exit 2; }
+[ -n "$RESOURCE" ] || { echo "[ERRO] Informe --resource" >&2; exit 2; }
+[ -n "$SNAP" ] || { echo "[ERRO] Informe --snapshot" >&2; exit 2; }
+
+if [ "$TYPE" = "instance" ]; then
+  lxc info --project "$PROJECT" "$RESOURCE" >/dev/null 2>&1 || { echo "[ERRO] Instancia $RESOURCE nao existe" >&2; exit 1; }
+  if ! snapshot_exists "instance" "$RESOURCE" "$SNAP"; then echo "[ERRO] Snapshot $SNAP nao existe em $RESOURCE" >&2; exit 1; fi
+  OWNER="$RESOURCE"
+else
+  OWNER="$(get_owner "$RESOURCE")"
+  [ -n "$OWNER" ] || { echo "[ERRO] Volume $RESOURCE desconhecido. Abortando." >&2; exit 1; }
+  lxc storage volume list --project "$PROJECT" "$POOL" --format csv | cut -d, -f1 | grep -qx "$RESOURCE" || { echo "[ERRO] Volume $RESOURCE nao existe" >&2; exit 1; }
+  if ! snapshot_exists "volume" "$RESOURCE" "$SNAP"; then echo "[ERRO] Snapshot $SNAP nao existe no volume $RESOURCE" >&2; exit 1; fi
+fi
+
+echo "[AVISO] Vai SUBSTITUIR dados atuais de $TYPE $RESOURCE por $SNAP"
+if [ "$YES" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then read -r -p "Digite CONFIRMAR: " ans; [ "$ans" = "CONFIRMAR" ] || { echo "Cancelado"; trap - EXIT; exit 0; }; fi
+if [ "$DRY_RUN" -eq 1 ]; then echo "[DRY-RUN] Restauraria $TYPE $RESOURCE -> $SNAP (parando $OWNER se preciso)"; trap - EXIT; exit 0; fi
+
+st="$(get_state "$OWNER")" || { echo "[ERRO] Nao foi possivel determinar estado de $OWNER. Abortando." >&2; exit 1; }
+WAS_RUNNING["$OWNER"]="$st"
+if [[ "$st" == "Running" ]]; then
+  lxc stop --project "$PROJECT" "$OWNER" || { echo "[ERRO] Falha ao parar $OWNER" >&2; exit 1; }
+fi
+
+if [ "$TYPE" = "instance" ]; then
+  lxc restore --project "$PROJECT" "$RESOURCE" "$SNAP" || { echo "[ERRO] Falha no restore de $RESOURCE." >&2; exit 1; }
+else
+  lxc storage volume restore --project "$PROJECT" "$POOL" "$RESOURCE" "$SNAP" || { echo "[ERRO] Falha restore volume $RESOURCE" >&2; exit 1; }
+fi
+
+echo "[OK] Restore concluido: $TYPE $RESOURCE -> $SNAP"
+trap - EXIT
+restore_state
