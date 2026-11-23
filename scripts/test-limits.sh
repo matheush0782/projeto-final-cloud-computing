@@ -279,7 +279,7 @@ TESTED=()
 for nome in "${INSTANCIAS[@]}"; do
   log "Testando limites expandidos de '$nome' no projeto '$PROJETO'."
 
-  if ! config_json="$(lx query "/1.0/instances/${nome}?project=${PROJETO}" 2>&1)"; then
+  if ! config_json="$(lx_timeout 5s query "/1.0/instances/${nome}?project=${PROJETO}" 2>&1)"; then
     record_failure "$nome: não foi possível consultar expanded_config: $config_json"
     continue
   fi

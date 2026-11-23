@@ -63,7 +63,7 @@ def redact_sensitive_arg_values(items):
         separator = redacted.index("--")
         command = redacted[separator + 1 :]
         expected_lengths = {
-            ("bash", "/root/config-mariadb.sh"): 6,
+            ("bash", "/root/config-mariadb.sh"): 7,
             ("bash", "/root/instala-wp.sh"): 7,
         }
         expected = expected_lengths.get(tuple(command[:2]))

@@ -38,7 +38,7 @@ lx info "$APP" >/dev/null
 # Cada ambiente recebe sua propria CA e seu certificado (sem enviar chaves ao GitHub).
 TLS_DIR="$RAIZ/conf/tls/$ENV"
 umask 077
-mkdir -p -m 700 "$TLS_DIR"
+mkdir -p "$TLS_DIR"
 chmod 700 "$TLS_DIR"
 
 if [[ -f "$TLS_DIR/ca.key" && -f "$TLS_DIR/ca.crt" && \

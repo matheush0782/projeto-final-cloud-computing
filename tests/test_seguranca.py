@@ -175,7 +175,7 @@ class MockDeployMixin:
                 separator = args.index("--")
                 command = args[separator + 1 :]
                 script_lengths = {
-                    ("bash", "/root/config-mariadb.sh"): 6,
+                    ("bash", "/root/config-mariadb.sh"): 7,
                     ("bash", "/root/instala-wp.sh"): 7,
                 }
                 expected_length = script_lengths.get(tuple(command[:2]))
@@ -495,11 +495,22 @@ class TemporaryCleanupTests(unittest.TestCase):
             try:
                 process.stdin.write(marker + "\n")
                 process.stdin.close()
+                process.stdin = None
                 deadline = time.monotonic() + 10
                 while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
                     time.sleep(0.05)
                 if not ready.exists():
-                    self.fail("harness não alcançou o ponto de TERM")
+                    if process.poll() is None:
+                        process.terminate()
+
+                    stdout, stderr = process.communicate(timeout=5)
+
+                    self.fail(
+                        f"harness não alcançou o ponto de TERM; "
+                        f"returncode={process.returncode}; "
+                        f"stdout={stdout!r}; stderr={stderr!r}"
+                    )
+
                 script_pid = int(pid_file.read_text().strip())
                 script_pgid = os.getpgid(script_pid)
                 # O processo root não pode ser sinalizado diretamente por ubuntu;

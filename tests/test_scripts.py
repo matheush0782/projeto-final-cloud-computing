@@ -57,7 +57,11 @@ class ScriptsTest(unittest.TestCase):
         self.assertEqual(s['instances'][PROJECT+'/dev-proxy']['devices']['porta-http']['listen'],'tcp:0.0.0.0:8082')
         self.assertNotIn('porta-https',s['instances'][PROJECT+'/dev-proxy']['devices'])
         maria=[x['args'] for x in s['log'] if '/root/config-mariadb.sh' in x['args'] and x['args'][0]=='exec'][-1]
-        self.assertIn('10.10.20.12',maria); self.assertIn('10.10.20.11',maria)
+        indice_senha = maria.index('--password-stdin')
+        self.assertEqual(
+            maria[indice_senha + 1:indice_senha + 3],
+            ['10.10.20.12', '10.10.20.11']
+        )
         wp=[x['args'] for x in s['log'] if '/root/instala-wp.sh' in x['args'] and x['args'][0]=='exec'][-1]
         self.assertIn('10.10.20.12',wp); self.assertIn('http://127.0.0.1:8082',wp)
     def test_deploy_existing_refuses_deletion(self):
