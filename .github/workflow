@@ -1,0 +1,25 @@
+name: Fase 6 - Validacao
+on:
+  push:
+    branches: [fase-6]
+  pull_request:
+    branches: [fase-6]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verifica estrutura
+        run: |
+          test -f scripts/01-snapshot.sh
+          test -f scripts/02-backup.sh
+          test -f scripts/03-restore.sh
+          test -f scripts/04-limpeza.sh
+          test -f docs/fase-6/README.md
+      - name: Sintaxe bash
+        run: bash -n scripts/01-snapshot.sh && bash -n scripts/02-backup.sh && bash -n scripts/03-restore.sh && bash -n scripts/04-limpeza.sh
+      - name: Sem duplicacao de shebang
+        run: |
+          for f in scripts/*.sh; do test "$(grep -c '^#!/usr/bin/env bash' "$f")" -eq 1; done
+      - name: Testes com mock
+        run: bash tests/test_fase6.sh
